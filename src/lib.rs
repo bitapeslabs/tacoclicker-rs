@@ -40,11 +40,11 @@ enum TortillaMessage {
 
     //80-98 are reserved for tortilla specific opcodes
     #[opcode(78)]
-    Register, //Check that theres a vout paying FUNDING_ADDRESS 21,000 sats and register user
+    Register { vout: u128 }, //Check that theres a vout paying FUNDING_ADDRESS 21,000 sats and register user
 
     #[opcode(79)]
     #[returns(bool)]
-    GetIsRegistered,
+    GetIsRegistered { vout: u128 },
 
     #[opcode(99)]
     #[returns(String)]
@@ -77,15 +77,24 @@ enum TortillaMessage {
 
 impl Tortilla {
     //=====  STORAGE POINTER DEFS =====
-    fn get_caller_registration_pointer(&self, alkane_id: &AlkaneId) -> StoragePointer {
-        let caller: Vec<u8> = alkane_id.into();
-        StoragePointer::from_keyword("/registrations").select(&caller)
+    fn get_caller_registration_pointer(&self, vout: usize) -> Result<StoragePointer> {
+        let caller_vout_id = self.get_caller_id_at_vout(vout)?;
+        Ok(StoragePointer::from_keyword("/registrations").select(&caller_vout_id))
     }
 
-    fn get_is_registered_value(&self, context: Context) -> Vec<u8> {
-        let registration_pointer = self.get_caller_registration_pointer(&context.caller);
+    fn get_caller_id_at_vout(&self, vout: usize) -> Result<Vec<u8>> {
+        let tx = self.get_serialized_transaction()?;
 
-        registration_pointer.get().to_vec()
+        match tx.output.get(vout) {
+            Some(output) => Ok(output.script_pubkey.as_bytes().to_vec()),
+            None => Err(anyhow!("TORTILLA: invalid script pub key at vout")),
+        }
+    }
+
+    fn get_is_registered_value(&self, vout: usize) -> Result<Vec<u8>> {
+        let registration_pointer = self.get_caller_registration_pointer(vout)?;
+
+        Ok(registration_pointer.get().to_vec())
     }
 
     //==================================
@@ -114,19 +123,29 @@ impl Tortilla {
         Ok(response)
     }
 
-    fn get_is_registered(&self) -> Result<CallResponse> {
+    fn get_is_registered(&self, vout: u128) -> Result<CallResponse> {
         let context = self.context()?;
         let mut response = CallResponse::forward(&context.incoming_alkanes);
 
-        response.data = self.get_is_registered_value(context);
+        response.data = self.get_is_registered_value(
+            vout.try_into()
+                .map_err(|_| anyhow!("TORTILLA: failed to unwrap vout into usize"))?,
+        )?;
         Ok(response)
     }
 
-    fn register(&self) -> Result<CallResponse> {
+    // The scriptpubkey @ 'vout' will be granted access
+    // methods that should only be called by 'vout' will check if the sig of any vin was signed by the registered 'vout' scriptpubkey
+    // This gives us account based functionality, in a utxo based environment.
+    fn register(&self, vout: u128) -> Result<CallResponse> {
+        let safe_vout: usize = vout
+            .try_into()
+            .map_err(|_| anyhow!("TORTILLA: failed to unwrap vout into usize"))?;
+
         let context = self.context()?;
         let response = CallResponse::forward(&context.incoming_alkanes);
 
-        let mut registration_pointer = self.get_caller_registration_pointer(&context.caller);
+        let mut registration_pointer = self.get_caller_registration_pointer(safe_vout)?;
 
         let tx = self.get_serialized_transaction()?;
 
@@ -145,7 +164,7 @@ impl Tortilla {
         );
 
         let is_registered = u8::from_le_bytes(
-            self.get_is_registered_value(context)
+            self.get_is_registered_value(safe_vout)?
                 .try_into()
                 .map_err(|_| anyhow!("TORTILLA: invalid u128 at /registered"))?,
         );
