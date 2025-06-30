@@ -1,9 +1,9 @@
 [package]
-name = "alkane-pandas-ap69"
+name = "tortilla"
 version = "0.1.0"
 edition = "2021"
-description = "Alkane Pandas AP69"
-authors = ["Alkane Pandas"]
+description = "tortilla-rs"
+authors = ["Bitapes Labs"]
 
 [lib]
 crate-type = ["cdylib", "rlib"]
