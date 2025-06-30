@@ -6,7 +6,6 @@ pub mod consts;
 pub mod token;
 pub mod utils;
 
-use alkanes_runtime::imports::externs::UnwrapThrowExt;
 use alkanes_runtime::storage::StoragePointer;
 use alkanes_runtime::{declare_alkane, message::MessageDispatch, runtime::AlkaneResponder};
 use alkanes_support::context::Context;
@@ -92,11 +91,10 @@ impl Tortilla {
     //==================================
 
     //===== chain helpers =====
-    fn get_serialized_transaction(&self) -> Transaction {
-        consensus_decode::<Transaction>(&mut std::io::Cursor::new(self.transaction())).expect_throw(
-            "
-      TORTILLA: Failed to decode transaction",
-        )
+    fn get_serialized_transaction(&self) -> Result<Transaction> {
+        let tx = consensus_decode::<Transaction>(&mut std::io::Cursor::new(self.transaction()))
+            .map_err(|_| anyhow!("TORTILLA: Failed to decode transaction"))?;
+        Ok(tx)
     }
     //==================================
 
@@ -130,7 +128,7 @@ impl Tortilla {
 
         let mut registration_pointer = self.get_caller_registration_pointer(&context.caller);
 
-        let tx = self.get_serialized_transaction();
+        let tx = self.get_serialized_transaction()?;
 
         let total_value_to_funding: u64 = tx
             .output
@@ -149,7 +147,7 @@ impl Tortilla {
         let is_registered = u8::from_le_bytes(
             self.get_is_registered_value(context)
                 .try_into()
-                .expect_throw("TORTILLA: invalid u128 at /registered"),
+                .map_err(|_| anyhow!("TORTILLA: invalid u128 at /registered"))?,
         );
 
         ensure!(
