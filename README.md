@@ -1,4 +1,4 @@
-# Taco Clicker Alkanes Contracts
+# Taco Clicker
 
 
 ## building
@@ -16,7 +16,7 @@ The tortilla contract is the main alkanes token and contract for taco clicker. I
 If initialized, checks if `FUNDING_PRICE_SATS` is sent to `FUNDING ADDRESS`, and if so, clones the taqueria factory contract @ [2,n] and
     transfers the taqueria AlkaneId to the caller. Because the taqeuria contract can only be initialized byy the tortilla contract, the payment of `FUNDING_PRICE_SATS` is enforced from the get go.
 
-(79n) -> `get_is_valid_registration (alkane_id: AlkaneID)`- 
+(79n) -> `check_valid_registrations (alkane_ids: Vec<u8> -> impls from Vec<AlkaneId> )`- 
 
 The user is incharge of having knowledge of which alkaneid in their balance corresponds to a taqueria. This
 method allows the user to do so, they can query every alkaneid in their balance and check if its a valid registered taqueria. The reason we dont have a 
