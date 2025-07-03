@@ -1,0 +1,14 @@
+{
+  "alkanes": [],
+  "transaction": "0x",
+  "height": "0xFFFFFF",
+  "txindex": 0,
+  "target": {
+    "block": "2n",
+    "tx": "10n"
+  },
+  "inputs": ["78n"],
+  "pointer": 0,
+  "refundPointer": 0,
+  "vout": 0
+}
