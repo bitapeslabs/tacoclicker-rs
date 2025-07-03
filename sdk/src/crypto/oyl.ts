@@ -2,7 +2,7 @@ import * as bitcoin from "bitcoinjs-lib";
 import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
 import { getPath, WalletSigner } from "./wallet";
 import { NETWORK, CHOSEN_WALLET } from "@/consts";
-import { Account, Signer as OylSigner, SpendStrategy } from "@/libs/alkanes";
+import { Account, SpendStrategy } from "@/libs/alkanes";
 
 const makePath = (purpose: number, idx: number) =>
   `m/${purpose}'/0'/0'/0/${idx}`;
@@ -80,9 +80,9 @@ export const getOylAccountFromSigner = (signer: WalletSigner): Account => {
   };
 };
 
-export const getOylSignerFromWalletSigner = (
+export const getOylSignerKeysFromWalletSigner = (
   walletSigner: WalletSigner
-): OylSigner => {
+) => {
   const { root } = walletSigner; // BIP-32 master (xprv)
   const idx = CHOSEN_WALLET; // which account the dApp/UI selected
 
@@ -103,5 +103,5 @@ export const getOylSignerFromWalletSigner = (
   };
 
   // Hand everything to Oyl’s Signer
-  return new OylSigner(NETWORK, keys);
+  return keys;
 };

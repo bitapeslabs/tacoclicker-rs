@@ -135,3 +135,4 @@ export const alkanes_simulate = async (
 };
 
 export * from "./types";
+export * from "./utils";

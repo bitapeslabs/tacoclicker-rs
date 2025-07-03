@@ -107,3 +107,4 @@ export const ord_getInscriptionMetadata = async (id: string) => {
   }
 };
 export * from "./types";
+export * from "./utils";

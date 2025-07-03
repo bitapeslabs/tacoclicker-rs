@@ -139,3 +139,4 @@ export async function sandshrew_getFormattedUtxosForAddress(
   }
 }
 export * from "./types";
+export * from "./shared";
