@@ -1,5 +1,5 @@
 import { AlkanesParsedSimulationResult } from "./types";
-
+import { AlkanesTraceEncodedResult, AlkanesTraceResult } from "./types";
 export const stripHex = (s: string) => (s.startsWith("0x") ? s.slice(2) : s);
 
 export function mapToPrimitives(v: any): any {
@@ -56,4 +56,57 @@ export function parseSimulateReturn(
     le: BigInt("0x" + rev).toString(),
     be: BigInt("0x" + stripHex(v)).toString(),
   };
+}
+
+function hexLEToBigInt(hex: string): bigint {
+  if (!/^0x[0-9a-fA-F]+$/.test(hex)) {
+    throw new Error(`Invalid hex string: ${hex}`);
+  }
+
+  let raw = hex.slice(2); // strip `0x`
+  if (raw.length % 2 !== 0) raw = "0" + raw; // make even length
+
+  // reverse byte order (little-endian → big-endian)
+  let be = "";
+  for (let i = 0; i < raw.length; i += 2) {
+    be = raw.substring(i, i + 2) + be;
+  }
+  return BigInt("0x" + be);
+}
+
+/**
+ * Recursively walks a structure and converts every *hex string* (`/^0x[0-9a-f]+$/i`)
+ * it finds into a `bigint` via `hexLEToBigInt`.
+ */
+function deepHexToBigInt<T>(value: T): unknown {
+  if (Array.isArray(value)) {
+    return value.map(deepHexToBigInt);
+  }
+
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = deepHexToBigInt(v as never);
+    }
+    return out;
+  }
+
+  if (typeof value === "string" && /^0x[0-9a-fA-F]+$/.test(value)) {
+    return hexLEToBigInt(value);
+  }
+
+  return value;
+}
+
+/**
+ * Top-level helper that takes an encoded trace and returns a fully-decoded trace,
+ * where every little-endian hex string has become a `bigint`.
+ */
+export function decodeAlkanesTrace(
+  encoded: AlkanesTraceEncodedResult
+): AlkanesTraceResult {
+  // `deepHexToBigInt` already returns data in the correct shape,
+  // but TS needs a cast to satisfy the compiler.
+  const decoded = deepHexToBigInt(encoded) as unknown as AlkanesTraceResult;
+  return decoded;
 }

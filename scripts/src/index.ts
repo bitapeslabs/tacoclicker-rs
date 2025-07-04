@@ -14,23 +14,12 @@ const provider = new Provider({
 const start = async () => {
   const { signPsbt } = walletSigner;
 
-  let result = await provider.execute({
-    address: "bcrt1p3xw7j2hmj8j6npttr77kzyt5gq5d338nhfq3dwm6qqru99nzusjqsvrlpw",
-    callData: [5n, 10n],
-  });
-
-  if (isBoxedError(result)) {
-    console.error("Error during simulation:", result.message);
-    return;
-  }
-
-  const rawTransactionHex = signPsbt(result.data.psbt);
-
-  const txid = consumeOrThrow(
-    await provider.rpc.electrum.esplora_broadcastTx(rawTransactionHex)
+  let result = await provider.trace(
+    "d115a2745abaa23918d17f1098eb25ce0a261ceafe0b8c9916f4c853e1852374",
+    4
   );
-  console.log("transaction broadcasted!");
-  console.log("Transaction ID:", provider.explorerUrl + "/tx/" + txid);
+
+  console.log(result);
 };
 process.removeAllListeners("warning");
 process.on("warning", (w) => {

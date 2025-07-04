@@ -7,7 +7,7 @@ import {
 
 import { execute, simulate } from "@/libs/alkanes";
 
-import { BaseRpcProvider } from "./apis";
+import { AlkanesRpcProvider, BaseRpcProvider } from "./apis";
 
 export interface ProviderConfig {
   sandshrewUrl: string;
@@ -58,5 +58,13 @@ export class Provider {
     request: Parameters<typeof simulate>[1]
   ): ReturnType<typeof simulate> {
     return simulate(this, request);
+  }
+
+  trace(
+    ...args: Parameters<typeof AlkanesRpcProvider.prototype.alkanes_trace>
+  ): ReturnType<
+    ReturnType<typeof AlkanesRpcProvider.prototype.alkanes_trace>["call"]
+  > {
+    return this.rpc.alkanes.alkanes_trace(...args).call();
   }
 }

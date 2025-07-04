@@ -1,5 +1,10 @@
 /* AlkanesProvider.ts ------------------------------------------------------ */
-import { BoxedResponse, BoxedSuccess, BoxedError, isBoxedError } from "@/boxed";
+import {
+  BoxedResponse,
+  BoxedSuccess,
+  consumeOrThrow,
+  isBoxedError,
+} from "@/boxed";
 import {
   AlkanesByAddressResponse,
   AlkanesOutpoint,
@@ -8,8 +13,9 @@ import {
   AlkanesRawSimulationResponse,
   AlkanesSimulationResult,
   AlkanesOutpoints,
+  AlkanesTraceEncodedResult,
 } from "@/apis/alkanes/types";
-import { parseSimulateReturn } from "./utils";
+import { parseSimulateReturn, decodeAlkanesTrace } from "./utils";
 import { Provider } from "@/provider";
 
 export enum AlkanesFetchError {
@@ -62,7 +68,18 @@ export class AlkanesRpcProvider {
 
   alkanes_trace(txid: string, vout: number) {
     const leTxid = Buffer.from(txid, "hex").reverse().toString("hex");
-    return this.rpc("alkanes_trace", [{ txid: leTxid, vout }]);
+    return {
+      payload: ["alkanes_trace", [{ txid: leTxid, vout }]],
+      call: async () => {
+        return decodeAlkanesTrace(
+          consumeOrThrow(
+            await this.rpc<AlkanesTraceEncodedResult>("alkanes_trace", [
+              { txid: leTxid, vout },
+            ]).call()
+          )
+        );
+      },
+    };
   }
 
   alkanes_getAlkaneById(id: AlkaneId) {

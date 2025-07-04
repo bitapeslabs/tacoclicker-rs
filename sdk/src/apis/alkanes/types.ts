@@ -1,10 +1,24 @@
-export interface AlkaneId {
+export interface EncodedAlkaneId {
   block: string;
   tx: string;
 }
+
+export type AlkaneEncoded = {
+  value: string; // in satoshis
+} & EncodedAlkaneId;
+
+export type AlkaneId = {
+  block: bigint;
+  tx: bigint;
+};
+
+export type Alkane = {
+  value: bigint; // in satoshis
+} & AlkaneId;
+
 export interface AlkaneRune {
   rune: {
-    id: AlkaneId;
+    id: EncodedAlkaneId;
     name: string;
     spacedName: string;
     divisibility: number;
@@ -14,7 +28,7 @@ export interface AlkaneRune {
   balance: string;
 }
 export interface ProtoRunesToken {
-  id: AlkaneId;
+  id: EncodedAlkaneId;
   name: string;
   symbol: string;
 }
@@ -84,7 +98,7 @@ export interface AlkaneSimulateRequest {
   block: string;
   height: string;
   txindex: number;
-  target: AlkaneId;
+  target: EncodedAlkaneId;
   inputs: string[];
   pointer: number;
   refundPointer: number;
@@ -127,3 +141,91 @@ export type AlkanesSimulationResult = {
   parsed: AlkanesParsedSimulationResult | undefined;
   error?: string;
 };
+
+export interface AlkanesTraceEncodedCreateEvent {
+  event: "create";
+  data: EncodedAlkaneId;
+}
+
+export interface AlkanesTraceEncodedInvokeEvent {
+  event: "invoke";
+  data: {
+    type: "call";
+    context: {
+      myself: EncodedAlkaneId;
+      caller: EncodedAlkaneId;
+      inputs: string[];
+      incomingAlkanes: AlkaneEncoded[];
+      vout: number;
+    };
+    fuel: number;
+  };
+}
+
+export interface AlkanesTraceEncodedReturnEvent {
+  event: "return";
+  data: {
+    status: "success";
+    response: {
+      alkanes: AlkaneEncoded[];
+      data: string;
+      storage: {
+        key: string;
+        value: string;
+      }[];
+    };
+  };
+}
+
+export type AlkanesTraceEncodedEvent =
+  | AlkanesTraceEncodedCreateEvent
+  | AlkanesTraceEncodedInvokeEvent
+  | AlkanesTraceEncodedReturnEvent;
+
+export interface AlkanesTraceEncodedResult {
+  result: AlkanesTraceEncodedEvent[];
+}
+
+export interface AlkanesTraceCreateEvent {
+  event: "create";
+  data: AlkaneId;
+}
+
+export interface AlkanesTraceInvokeEvent {
+  event: "invoke";
+  data: {
+    type: "call";
+    context: {
+      myself: AlkaneId;
+      caller: AlkaneId;
+      inputs: bigint[];
+      incomingAlkanes: Alkane[];
+      vout: number;
+    };
+    fuel: number;
+  };
+}
+
+export interface AlkanesTraceReturnEvent {
+  event: "return";
+  data: {
+    status: "success";
+    response: {
+      alkanes: Alkane[];
+      data: string;
+      storage: {
+        key: string;
+        value: bigint;
+      }[];
+    };
+  };
+}
+
+export type AlkanesTraceEvent =
+  | AlkanesTraceCreateEvent
+  | AlkanesTraceInvokeEvent
+  | AlkanesTraceReturnEvent;
+
+export interface AlkanesTraceResult {
+  result: AlkanesTraceEvent[];
+}
