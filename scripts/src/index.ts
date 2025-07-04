@@ -1,6 +1,7 @@
 import * as bitcoin from "bitcoinjs-lib";
 import { Provider } from "tacoclicker-sdk";
 import { consumeOrThrow, isBoxedError } from "./boxed";
+import { walletSigner } from "./crypto/wallet";
 
 const provider = new Provider({
   sandshrewUrl: "https://boynet.mezcal.sh/sandshrew",
@@ -11,6 +12,8 @@ const provider = new Provider({
 });
 
 const start = async () => {
+  const { signPsbt } = walletSigner;
+
   let result = await provider.execute({
     address: "bcrt1p3xw7j2hmj8j6npttr77kzyt5gq5d338nhfq3dwm6qqru99nzusjqsvrlpw",
     callData: [5n, 10n],
@@ -21,7 +24,13 @@ const start = async () => {
     return;
   }
 
-  console.log("Simulation Result:", result);
+  const rawTransactionHex = signPsbt(result.data.psbt);
+
+  const txid = consumeOrThrow(
+    await provider.rpc.electrum.esplora_broadcastTx(rawTransactionHex)
+  );
+  console.log("transaction broadcasted!");
+  console.log("Transaction ID:", provider.explorerUrl + "/tx/" + txid);
 };
 process.removeAllListeners("warning");
 process.on("warning", (w) => {

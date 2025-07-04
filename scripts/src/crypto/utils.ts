@@ -1,4 +1,4 @@
-import { IEsploraTransaction } from "@/apis/esplora/types";
+import { IEsploraTransaction } from "tacoclicker-sdk";
 import { Transaction as BitcoinJsTransaction } from "bitcoinjs-lib";
 
 /**

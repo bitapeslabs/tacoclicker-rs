@@ -1,8 +1,9 @@
 import * as bitcoin from "bitcoinjs-lib";
 import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
-import { Account, SpendStrategy } from "@/libs/alkanes";
-import { Provider } from "@/provider";
+import { Account, SpendStrategy } from "tacoclicker-sdk";
+import { Provider } from "tacoclicker-sdk";
 import type { BIP32Interface } from "bip32";
+import { walletData } from "@/consts";
 
 export type WalletSigner = {
   root: BIP32Interface;
