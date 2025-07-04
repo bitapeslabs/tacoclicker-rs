@@ -1,138 +1,125 @@
+/* AlkanesProvider.ts ------------------------------------------------------ */
 import { BoxedResponse, BoxedSuccess, BoxedError, isBoxedError } from "@/boxed";
 import {
-  AlkanesResponse,
   AlkanesByAddressResponse,
   AlkanesOutpoint,
   AlkaneId,
-  AlkaneToken,
   AlkaneSimulateRequest,
   AlkanesRawSimulationResponse,
   AlkanesSimulationResult,
+  AlkanesOutpoints,
 } from "@/apis/alkanes/types";
 import { parseSimulateReturn } from "./utils";
-import { buildRpcCall } from "../sandshrew/shared";
+import { Provider } from "@/provider";
 
 export enum AlkanesFetchError {
   UnknownError = "UnknownError",
   RpcError = "RpcError",
 }
 
-export const alkanes_metashrewHeight = () => buildRpcCall("metashrew_height");
+export class AlkanesRpcProvider {
+  constructor(private readonly provider: Provider) {}
 
-export const alkanes_getAlkanesByAddress = async (
-  address: string,
-  protocolTag = "1",
-  runeName?: string
-) => {
-  const res = await buildRpcCall<AlkanesByAddressResponse>(
-    "alkanes_protorunesbyaddress",
-    [{ address, protocolTag }]
-  ).call();
+  private get rpc() {
+    return this.provider.buildRpcCall.bind(this.provider);
+  }
 
-  if (isBoxedError(res)) return res;
+  alkanes_metashrewHeight() {
+    return this.rpc<string>("metashrew_height", []);
+  }
 
-  const outpoints = res.data.outpoints
-    .filter((o) => o.runes.length)
-    .map((o) => ({
-      ...o,
-      outpoint: {
-        vout: o.outpoint.vout,
-        txid: Buffer.from(o.outpoint.txid, "hex").reverse().toString("hex"),
+  async alkanes_getAlkanesByAddress(
+    address: string,
+    protocolTag = "1",
+    runeName?: string
+  ): Promise<BoxedResponse<AlkanesByAddressResponse, string>> {
+    const res = await this.rpc<AlkanesByAddressResponse>(
+      "alkanes_protorunesbyaddress",
+      [{ address, protocolTag }]
+    ).call();
+
+    if (isBoxedError(res)) return res;
+
+    return new BoxedSuccess(res.data);
+  }
+
+  alkanes_getAlkanesByHeight(height: number, protocolTag = "1") {
+    throw "Method not implemented";
+  }
+
+  alkanes_getAlkanesByOutpoint(
+    txid: string,
+    vout: number,
+    protocolTag = "1",
+    height = "latest"
+  ) {
+    const leTxid = Buffer.from(txid, "hex").reverse().toString("hex");
+    return this.rpc<AlkanesOutpoints[]>("alkanes_protorunesbyoutpoint", [
+      { txid: leTxid, vout, protocolTag },
+      height,
+    ]);
+  }
+
+  alkanes_trace(txid: string, vout: number) {
+    const leTxid = Buffer.from(txid, "hex").reverse().toString("hex");
+    return this.rpc("alkanes_trace", [{ txid: leTxid, vout }]);
+  }
+
+  alkanes_getAlkaneById(id: AlkaneId) {
+    return this.rpc("alkanes_meta", [
+      {
+        target: id,
+        alkanes: [],
+        transaction: "0x",
+        block: "0x",
+        height: "0x",
+        txindex: 0,
+        inputs: [],
+        pointer: 0,
+        refundPointer: 0,
+        vout: 0,
       },
-      runes: o.runes.map((r) => ({
-        ...r,
-        balance: parseInt(r.balance, 16).toString(),
-        rune: {
-          ...r.rune,
-          id: {
-            block: parseInt(r.rune.id.block, 16).toString(),
-            tx: parseInt(r.rune.id.tx, 16).toString(),
-          },
-        },
-      })),
-    }));
+    ]);
+  }
 
-  const filtered = runeName
-    ? outpoints.flatMap((op) =>
-        op.runes.filter((r) => r.rune.name === runeName)
-      )
-    : outpoints;
+  async alkanes_simulate(
+    req: Partial<AlkaneSimulateRequest>
+  ): Promise<BoxedResponse<AlkanesSimulationResult, string>> {
+    const currentHeight =
+      (await this.alkanes_metashrewHeight().call()) as BoxedResponse<
+        string,
+        string
+      >;
+    if (isBoxedError(currentHeight)) return currentHeight;
 
-  return new BoxedSuccess(filtered as AlkanesOutpoint[]);
-};
-
-export const alkanes_getAlkanesByHeight = (height: number, protocolTag = "1") =>
-  buildRpcCall<AlkanesResponse>("alkanes_protorunesbyheight", [
-    { height, protocolTag },
-  ]);
-
-export const alkanes_getAlkanesByOutpoint = (
-  txid: string,
-  vout: number,
-  protocolTag = "1",
-  height = "latest"
-) => {
-  const littleEndianTxid = Buffer.from(txid, "hex").reverse().toString("hex");
-  return buildRpcCall<AlkanesOutpoint[]>("alkanes_protorunesbyoutpoint", [
-    { txid: littleEndianTxid, vout, protocolTag },
-    height,
-  ]);
-};
-
-export const alkanes_trace = (txid: string, vout: number) => {
-  const littleEndianTxid = Buffer.from(txid, "hex").reverse().toString("hex");
-  return buildRpcCall<unknown>("alkanes_trace", [
-    { txid: littleEndianTxid, vout },
-  ]);
-};
-
-export const alkanes_getAlkaneById = (id: AlkaneId) =>
-  buildRpcCall("alkanes_meta", [
-    {
-      target: id,
+    const merged: AlkaneSimulateRequest = {
       alkanes: [],
       transaction: "0x",
       block: "0x",
-      height: "0x",
+      height: currentHeight.data,
       txindex: 0,
+      target: { block: "0", tx: "0" },
       inputs: [],
       pointer: 0,
       refundPointer: 0,
       vout: 0,
-    },
-  ]);
+      ...req,
+    };
 
-export const alkanes_simulate = async (
-  req: Partial<AlkaneSimulateRequest>
-): Promise<BoxedResponse<AlkanesSimulationResult, string>> => {
-  const curentHeight =
-    (await alkanes_metashrewHeight().call()) as BoxedResponse<string, string>;
-  if (isBoxedError(curentHeight)) return curentHeight;
+    const res = await this.rpc<AlkanesRawSimulationResponse>(
+      "alkanes_simulate",
+      [merged]
+    ).call();
 
-  const merged: AlkaneSimulateRequest = {
-    alkanes: [],
-    transaction: "0x",
-    block: "0x",
-    height: curentHeight.data,
-    txindex: 0,
-    target: { block: "0", tx: "0" },
-    inputs: [],
-    pointer: 0,
-    refundPointer: 0,
-    vout: 0,
-    ...req,
-  };
-  const res = await buildRpcCall<AlkanesRawSimulationResponse>(
-    "alkanes_simulate",
-    [merged]
-  ).call();
+    if (isBoxedError(res)) return res;
 
-  if (isBoxedError(res)) return res;
-  return new BoxedSuccess({
-    raw: res.data,
-    parsed: parseSimulateReturn(res.data.execution.data),
-  });
-};
+    return new BoxedSuccess({
+      raw: res.data,
+      parsed: parseSimulateReturn(res.data.result.execution.data),
+      error: res.data.result.execution.error,
+    });
+  }
+}
 
 export * from "./types";
 export * from "./utils";

@@ -11,6 +11,7 @@
     "dev": "node esbuild.config.mjs && node dist/index.js"
   },
   "dependencies": {
+    "bitcoinjs-lib": "^6.1.7",
     "tacoclicker-sdk": "file:../sdk"
   }
 }

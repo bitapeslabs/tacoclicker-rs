@@ -1,142 +1,225 @@
 import {
-  BoxedResponse,
-  BoxedSuccess,
   BoxedError,
+  BoxedSuccess,
+  BoxedResponse,
   consumeOrThrow,
+  isBoxedError,
 } from "@/boxed";
-import { RpcCall, RpcTuple } from "./shared";
-import { ALKANES_PROVIDER } from "@/consts";
-import { FormattedUtxo } from "./types";
-import { esplora_getspendableinputs, esplora_getutxos } from "../esplora";
-import { EsploraUtxo, IEsploraSpendableUtxo } from "../esplora/types";
-import { ord_getInscriptionById, ord_getTxOutput } from "../ord";
+import { Provider } from "@/provider";
+
+import { RpcCall, RpcResponse, RpcTuple } from "./shared";
+
+import { ElectrumApiProvider } from "../esplora";
+
+import { OrdRpcProvider } from "../ord";
+
+import { AlkanesRpcProvider } from "../alkanes";
+
 import {
-  alkanes_getAlkanesByOutpoint,
-  alkanes_metashrewHeight,
-} from "../alkanes";
-import { AlkanesUtxoEntry } from "../alkanes/types";
-import { AlkaneReadableId, AlkanesOutpoint } from "../alkanes/types";
+  EsploraUtxo,
+  IEsploraSpendableUtxo,
+  IEsploraTransaction,
+} from "../esplora/types";
+
 import { OrdOutput } from "../ord/types";
+
+import {
+  AlkanesOutpoint,
+  AlkanesUtxoEntry,
+  AlkaneReadableId,
+  AlkanesOutpoints,
+  AlkanesOutpointsExtended,
+} from "../alkanes/types";
+
+import { FormattedUtxo } from "./types";
 
 export enum SandshrewFetchError {
   UnknownError = "UnknownError",
-  RpcError = "RpcError",
+  InternalError = "InternalError",
 }
 
-export async function sandshrew_multiget(
-  calls: RpcCall<unknown>[]
-): Promise<BoxedResponse<unknown[], SandshrewFetchError>> {
-  const tuples: RpcTuple[] = calls.map((c) => c.payload);
+export class SandshrewRpcProvider {
+  constructor(
+    private readonly provider: Provider,
+    private readonly electrumApiProvider: ElectrumApiProvider,
+    private readonly ordRpcProvider: OrdRpcProvider,
+    private readonly alkanesRpcProvider: AlkanesRpcProvider
+  ) {}
 
-  try {
-    const res = await fetch(ALKANES_PROVIDER.url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: Date.now(),
-        method: "sandshrew_multicall",
-        params: [tuples],
-      }),
-    });
+  async sandshrew_multcall(
+    rpcCalls: RpcCall<unknown>[]
+  ): Promise<BoxedResponse<unknown[], SandshrewFetchError>> {
+    const rpcTuples: RpcTuple[] = rpcCalls.map((rpcCall) => rpcCall.payload);
 
-    const json = await res.json();
-    if (json.error) {
+    try {
+      const rpcResponse = consumeOrThrow(
+        await this.provider
+          .buildRpcCall<
+            RpcResponse<unknown>[]
+          >("sandshrew_multicall", rpcTuples)
+          .call()
+      );
+
+      const errors = rpcResponse.filter(
+        (response) => response?.error !== undefined
+      );
+
+      if (errors.length > 0) {
+        return new BoxedError(
+          SandshrewFetchError.InternalError,
+          `
+          Some RPC calls failed:
+          ${errors.map((error, index) => `(${index}) Method ${rpcCalls[index].call.name} with params ${rpcCalls[index].payload} failed with error: ${error}\n\n`)}
+          `
+        );
+      }
+
+      return new BoxedSuccess(rpcResponse.map((response) => response.result));
+    } catch (error) {
       return new BoxedError(
-        SandshrewFetchError.RpcError,
-        typeof json.error === "string" ? json.error : json.error.message
+        SandshrewFetchError.UnknownError,
+        (error as Error).message ?? "Unknown Error"
       );
     }
-    return new BoxedSuccess(json.result as unknown[]);
-  } catch (err) {
-    return new BoxedError(
-      SandshrewFetchError.UnknownError,
-      (err as Error)?.message ?? "Unknown Error"
-    );
   }
-}
 
-//will abort if the user has more than 500 utxos because of electrs!
-export async function sandshrew_getFormattedUtxosForAddress(
-  address: string
-): Promise<BoxedResponse<FormattedUtxo[], SandshrewFetchError>> {
-  try {
-    const currentBlockHeight = Number(
-      consumeOrThrow(await alkanes_metashrewHeight().call())
-    );
+  /* -------------------------------------------------------------- */
+  /* Build a fully formatted UTXO list for one address              */
+  /* -------------------------------------------------------------- */
+  async sandshrew_getFormattedUtxosForAddress(
+    address: string
+  ): Promise<BoxedResponse<FormattedUtxo[], SandshrewFetchError>> {
+    try {
+      /* 1.  Current chain height (for confirmation count) */
+      const currentBlockHeight = Number(
+        consumeOrThrow(
+          await this.alkanesRpcProvider.alkanes_metashrewHeight().call()
+        )
+      );
 
-    const availableUtxos = consumeOrThrow(await esplora_getutxos(address));
+      /* 2.  All confirmed UTXOs for this address */
+      const availableUtxos = consumeOrThrow(
+        await this.electrumApiProvider.esplora_getutxos(address)
+      );
 
-    const availableSpendableUtxos = consumeOrThrow(
-      await esplora_getspendableinputs(availableUtxos)
-    );
+      /* 3.  Enrich each UTXO with its full previous transaction */
+      const spendableInputs = consumeOrThrow(
+        await this.electrumApiProvider.esplora_getspendableinputs(
+          availableUtxos
+        )
+      );
 
-    const utxoMap = new Map<string, IEsploraSpendableUtxo>(
-      availableSpendableUtxos.map((utxo) => [`${utxo.txid}:${utxo.vout}`, utxo])
-    );
+      const spendableInputMap = new Map<string, IEsploraSpendableUtxo>(
+        spendableInputs.map((utxo) => [`${utxo.txid}:${utxo.vout}`, utxo])
+      );
 
-    const [ordByOutpoints, alkanesByOutpoints] = (
-      await Promise.all([
-        sandshrew_multiget(
-          availableUtxos.map((utxo) =>
-            ord_getTxOutput(`${utxo.txid}:${utxo.vout}`)
-          )
-        ),
-        sandshrew_multiget(
-          availableUtxos.map((utxo) =>
-            alkanes_getAlkanesByOutpoint(utxo.txid, utxo.vout)
-          )
-        ),
-      ])
-    ).map(consumeOrThrow) as [OrdOutput[], AlkanesOutpoint[]];
+      /* 4.  Fetch Ord output + Alkanes runes in two multicalls     */
+      const [ordOutputs, alkanesOutpointsMatrix] = (
+        await Promise.all([
+          this.sandshrew_multcall(
+            availableUtxos.map((unspent) =>
+              this.ordRpcProvider.ord_getTxOutput(
+                `${unspent.txid}:${unspent.vout}`
+              )
+            )
+          ),
+          this.sandshrew_multcall(
+            availableUtxos.map((unspent) =>
+              this.alkanesRpcProvider.alkanes_getAlkanesByOutpoint(
+                unspent.txid,
+                unspent.vout
+              )
+            )
+          ),
+        ])
+      ).map(consumeOrThrow) as [OrdOutput[], AlkanesOutpoints[]];
 
-    let formattedUtxos: FormattedUtxo[] = [];
-    for (let i = 0; i < availableUtxos.length; i++) {
-      const utxo = availableUtxos[i];
-      const ordOutput = ordByOutpoints[i];
-      const esploraUtxo = utxoMap.get(`${utxo.txid}:${utxo.vout}`);
-      const alkanesOutput = alkanesByOutpoints[i];
-      const confirmations =
-        currentBlockHeight - Number(esploraUtxo?.prevTx.status.block_height);
+      let alkanesOutpointsMatrixExtended: AlkanesOutpointsExtended[] =
+        alkanesOutpointsMatrix.map((alkaneBalance, index) => {
+          const utxo = availableUtxos[index];
+          const outpointId = `${utxo.txid}:${utxo.vout}`;
 
-      const alkanes: Record<string, AlkanesUtxoEntry> =
-        alkanesOutput.runes.reduce(
-          (acc, rune) => {
-            const readableId: AlkaneReadableId = `${rune.rune.id.block}:${rune.rune.id.tx}`;
-            acc[readableId] = {
-              value: rune.balance,
-              name: rune.rune.name,
-              symbol: rune.rune.symbol,
-            };
-            return acc;
-          },
-          {} as Record<string, AlkanesUtxoEntry>
+          return alkaneBalance.map((alkane) => ({
+            ...alkane,
+            outpoint: outpointId,
+          }));
+        });
+
+      /* 5.  Assemble nicely-typed FormattedUtxo objects            */
+      const formattedList: FormattedUtxo[] = [];
+
+      for (let index = 0; index < availableUtxos.length; index++) {
+        const rawUtxo = availableUtxos[index];
+        const ordOutput = ordOutputs[index];
+        const alkanesOutpoints = alkanesOutpointsMatrixExtended[index];
+
+        const spendableInput = spendableInputMap.get(
+          `${rawUtxo.txid}:${rawUtxo.vout}`
         );
 
-      const formattedUtxo: FormattedUtxo = {
-        txId: utxo.txid,
-        outputIndex: utxo.vout,
-        satoshis: utxo.value,
-        address: esploraUtxo?.prevTx.vout[utxo.vout].scriptpubkey_address!,
-        scriptPk: esploraUtxo?.prevTx.vout[utxo.vout].scriptpubkey!,
-        confirmations,
-        indexed: confirmations > 0,
-        inscriptions: ordOutput.inscriptions,
-        runes: ordOutput.runes,
-        alkanes: alkanes,
-        prevTx: esploraUtxo?.prevTx!,
-        prevTxHex: esploraUtxo?.prevTx.hex!,
-      };
+        if (!spendableInput) {
+          return new BoxedError(
+            SandshrewFetchError.UnknownError,
+            `Spendable input not found for ${rawUtxo.txid}:${rawUtxo.vout}`
+          );
+        }
 
-      formattedUtxos.push(formattedUtxo);
+        const confirmations =
+          currentBlockHeight -
+          Number(spendableInput.prevTx.status.block_height);
+
+        const alkanesMap: Record<string, AlkanesUtxoEntry> =
+          alkanesOutpoints.reduce(
+            (acc, alkaneOutpoint) => {
+              const alkaneId = `${alkaneOutpoint.token.id.block}:${alkaneOutpoint.token.id.tx}`;
+
+              if (!acc[alkaneId]) {
+                acc[alkaneId] = {
+                  name: alkaneOutpoint.token.name,
+                  symbol: alkaneOutpoint.token.symbol,
+                  value: "0",
+                };
+              }
+
+              acc[alkaneId].value = (
+                BigInt(acc[alkaneId].value) + BigInt(alkaneOutpoint.value)
+              ).toString();
+
+              return acc;
+            },
+            {} as Record<string, AlkanesUtxoEntry>
+          );
+
+        const formattedUtxo: FormattedUtxo = {
+          txId: rawUtxo.txid,
+          outputIndex: rawUtxo.vout,
+          satoshis: rawUtxo.value,
+          address:
+            spendableInput.prevTx.vout[rawUtxo.vout].scriptpubkey_address,
+          scriptPk: spendableInput.prevTx.vout[rawUtxo.vout].scriptpubkey,
+          confirmations,
+          indexed: confirmations > 0,
+          inscriptions: ordOutput.inscriptions,
+          runes: ordOutput.runes,
+          alkanes: alkanesMap,
+          prevTx: spendableInput.prevTx,
+          prevTxHex: spendableInput.prevTx.hex,
+        };
+
+        formattedList.push(formattedUtxo);
+      }
+
+      return new BoxedSuccess(formattedList);
+    } catch (error) {
+      console.error(error);
+      return new BoxedError(
+        SandshrewFetchError.UnknownError,
+        (error as Error).message
+      );
     }
-    return new BoxedSuccess(formattedUtxos);
-  } catch (err) {
-    return new BoxedError(
-      SandshrewFetchError.UnknownError,
-      (err as Error).message
-    );
   }
 }
+
+/* Re-export legacy types / helpers so old import paths keep working */
 export * from "./types";
 export * from "./shared";

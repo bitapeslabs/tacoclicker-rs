@@ -1,8 +1,9 @@
 import { AddressType } from "./types";
 import { addressFormats } from "@sadoprotocol/ordit-sdk";
 import * as bitcoin from "bitcoinjs-lib";
-import { ALKANES_PROVIDER, DEFAULT_FEE_RATE } from "@/consts";
 import { FormattedUtxo } from "@/apis/sandshrew";
+import { Provider } from "@/provider";
+import * as z from "zod";
 
 type BasePsbtParams = {
   feeRate?: number;
@@ -135,13 +136,15 @@ export function addInputDynamic(
 }
 
 export const psbtBuilder = async <T extends BasePsbtParams>(
+  provider: Provider,
   psbtBuilder: (params: T) => Promise<{ psbtBase64: string; fee?: number }>,
   params: T
 ): Promise<{ psbtBase64: string; fee: number; vsize: number }> => {
   const { psbtBase64 } = await psbtBuilder(params);
 
   const { fee: actualFee } = await getEstimatedFee({
-    feeRate: params.feeRate ?? DEFAULT_FEE_RATE,
+    provider,
+    feeRate: params.feeRate ?? provider.defaultFeeRate,
     psbtBase64,
   });
 
@@ -151,7 +154,8 @@ export const psbtBuilder = async <T extends BasePsbtParams>(
   });
 
   const { fee: finalFee, vsize } = await getEstimatedFee({
-    feeRate: params.feeRate ?? DEFAULT_FEE_RATE,
+    provider,
+    feeRate: params.feeRate ?? provider.defaultFeeRate,
     psbtBase64: finalPsbt,
   });
 
@@ -241,13 +245,14 @@ const SIZES = {
 };
 
 export const getEstimatedFee = async ({
+  provider,
   feeRate,
   psbtBase64,
 }: {
+  provider: Provider;
   feeRate: number;
   psbtBase64: string;
 }) => {
-  const provider = ALKANES_PROVIDER;
   const psbtObj = bitcoin.Psbt.fromBase64(psbtBase64, {
     network: provider.network,
   });
@@ -313,3 +318,40 @@ export const getEstimatedFee = async ({
     vsize,
   };
 };
+
+export const bigintReviver = (_: string, value: any) =>
+  typeof value === "string" && /^-?\d+n$/.test(value.trim())
+    ? BigInt(value.slice(0, -1)) // drop the trailing "n"
+    : value;
+
+export const stringifyBigInts = (val: any): any => {
+  if (typeof val === "bigint") return val.toString(); // 123n  -> "123"
+  if (Array.isArray(val)) return val.map(stringifyBigInts);
+  if (val && typeof val === "object") {
+    return Object.fromEntries(
+      Object.entries(val).map(([k, v]) => [k, stringifyBigInts(v)])
+    );
+  }
+  return val;
+};
+
+export const maybeBig = z.union([z.string(), z.number(), z.bigint()]);
+export const simulateRequestSchema = z
+  .object({
+    alkanes: z.array(z.any()).optional(),
+    transaction: z.string().optional(),
+    block: z.string().optional(),
+    height: maybeBig.optional(),
+    txindex: maybeBig.optional(),
+    inputs: z.array(maybeBig).optional(),
+    pointer: maybeBig.optional(),
+    refundPointer: maybeBig.optional(),
+    vout: maybeBig.optional(),
+    target: z
+      .object({
+        block: maybeBig.optional(),
+        tx: maybeBig.optional(),
+      })
+      .optional(),
+  })
+  .partial();

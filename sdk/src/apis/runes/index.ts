@@ -1,5 +1,4 @@
-import { buildRpcCall } from "../sandshrew/shared";
-
+import { Provider } from "@/provider";
 import { RunesAddressResult, RunesOutpointResult } from "./types";
 
 export enum RunesFetchError {
@@ -7,11 +6,26 @@ export enum RunesFetchError {
   RpcError = "RpcError",
 }
 
-export const runes_getAddress = (address: string, height: string = "latest") =>
-  buildRpcCall<RunesAddressResult>("runes_address", [address, height]);
+export class RunesRpcProvider {
+  constructor(private readonly provider: Provider) {}
 
-export const runes_getOutpoint = (
-  txidVout: string,
-  height: string = "latest"
-) => buildRpcCall<RunesOutpointResult>("runes_outpoint", [txidVout, height]);
+  private get rpc() {
+    return this.provider.buildRpcCall.bind(this.provider);
+  }
+
+  runes_getAddress(address: string, blockHeight: string = "latest") {
+    return this.rpc<RunesAddressResult>("runes_address", [
+      address,
+      blockHeight,
+    ]);
+  }
+
+  runes_getOutpoint(txidAndVout: string, blockHeight: string = "latest") {
+    return this.rpc<RunesOutpointResult>("runes_outpoint", [
+      txidAndVout,
+      blockHeight,
+    ]);
+  }
+}
+
 export * from "./types";

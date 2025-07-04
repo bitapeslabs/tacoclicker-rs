@@ -1,19 +1,22 @@
 import * as bitcoin from "bitcoinjs-lib";
-import { addInputDynamic, getEstimatedFee } from "./utils";
-
 import {
-  sandshrew_getFormattedUtxosForAddress,
-  FormattedUtxo,
-} from "@/apis/sandshrew";
+  addInputDynamic,
+  bigintReviver,
+  getEstimatedFee,
+  simulateRequestSchema,
+  stringifyBigInts,
+} from "./utils";
 
+import { FormattedUtxo } from "@/apis/sandshrew";
+import { encodeRunestoneProtostone, encipher, ProtoStone } from "alkanes";
 import {
   BoxedResponse,
   BoxedSuccess,
   BoxedError,
   consumeOrThrow,
 } from "@/boxed";
-import { DEFAULT_FEE_RATE } from "@/consts";
-import { alkanes_simulate, AlkaneSimulateRequest } from "@/apis/alkanes";
+import { AlkaneSimulateRequest } from "@/apis/alkanes";
+import { Provider } from "@/provider";
 
 export enum AlkanesExecuteError {
   UnknownError = "UnknownError",
@@ -25,19 +28,49 @@ export interface AlkanesExecuteResponse {
   vsize: number;
 }
 
-export const simulate = (params: Partial<AlkaneSimulateRequest>) =>
-  alkanes_simulate(params);
+export const simulate = (
+  provider: Provider,
+  params: Partial<AlkaneSimulateRequest>
+) => {
+  const parsedInput = JSON.parse(JSON.stringify(params), bigintReviver); // "123n" → 123n
+  const request = simulateRequestSchema.parse(parsedInput);
+
+  const rpcReadyRequest = stringifyBigInts(
+    request
+  ) as Partial<AlkaneSimulateRequest>;
+
+  return provider.rpc.alkanes.alkanes_simulate(rpcReadyRequest);
+};
 
 export const execute = async ({
+  provider,
   address,
-  protostone,
-  feeRate = DEFAULT_FEE_RATE,
+  callData,
+  feeRate,
 }: {
+  provider: Provider;
   address: string;
-  protostone: Buffer;
+  callData: bigint[];
   feeRate?: number;
 }): Promise<BoxedResponse<AlkanesExecuteResponse, AlkanesExecuteError>> => {
   try {
+    const sandshrew_getFormattedUtxosForAddress =
+      provider.rpc.sandshrew.sandshrew_getFormattedUtxosForAddress.bind(
+        provider.rpc.sandshrew
+      );
+
+    const protostoneBuffer = encodeRunestoneProtostone({
+      protostones: [
+        ProtoStone.message({
+          protocolTag: 1n,
+          edicts: [],
+          pointer: 0,
+          refundPointer: 0,
+          calldata: encipher(callData),
+        }),
+      ],
+    }).encodedRunestone;
+
     const availableUtxos = consumeOrThrow(
       await sandshrew_getFormattedUtxosForAddress(address)
     );
@@ -47,15 +80,17 @@ export const execute = async ({
     );
 
     const { psbt, fee, vsize } = await buildExecutePsbt({
+      provider,
       address,
-      protostone,
+      protostone: protostoneBuffer,
       alkanesUtxos,
       utxos: availableUtxos,
-      feeRate,
+      feeRate: feeRate ?? provider.defaultFeeRate, // default to 1 sat/vbyte if not provided
     });
 
     return new BoxedSuccess({ psbt, fee, vsize });
   } catch (err) {
+    console.error("Alkanes execute error:", err);
     return new BoxedError(
       AlkanesExecuteError.UnknownError,
       (err as Error)?.message ?? "Unknown Error"
@@ -64,20 +99,22 @@ export const execute = async ({
 };
 
 async function buildExecutePsbt({
+  provider,
   address,
   protostone,
   alkanesUtxos, // <-- keep!
   utxos,
   feeRate,
 }: {
+  provider: Provider;
   address: string;
   protostone: Buffer;
   alkanesUtxos: FormattedUtxo[];
   utxos: FormattedUtxo[];
-  feeRate: number;
+  feeRate?: number;
 }): Promise<{ psbt: string; fee: number; vsize: number }> {
-  const network = bitcoin.networks.bitcoin; // hard-code mainnet; change if needed
-  const SAT_PER_VBYTE = feeRate;
+  const network = provider.network;
+  const SAT_PER_VBYTE = feeRate ?? provider.defaultFeeRate;
   const MIN_RELAY = 546n;
 
   const psbt = new bitcoin.Psbt({ network });
@@ -102,6 +139,7 @@ async function buildExecutePsbt({
   psbt.addOutput({ script: protostone, value: 0 });
 
   const { fee: estFee, vsize } = await getEstimatedFee({
+    provider,
     psbtBase64: psbt.toBase64(),
     feeRate: SAT_PER_VBYTE,
   });
@@ -121,6 +159,7 @@ async function buildExecutePsbt({
     change = 0;
   }
   const final = await getEstimatedFee({
+    provider,
     psbtBase64: psbt.toBase64(),
     feeRate: SAT_PER_VBYTE,
   });
@@ -134,4 +173,3 @@ async function buildExecutePsbt({
 
 export * from "./types";
 export * from "./utils";
-export * from "./provider";

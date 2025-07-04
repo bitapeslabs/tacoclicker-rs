@@ -1,5 +1,5 @@
-import { BoxedResponse, BoxedSuccess, BoxedError, isBoxedError } from "@/boxed";
-import { buildRpcCall } from "../sandshrew/shared";
+import { BoxedError, BoxedSuccess, BoxedResponse, isBoxedError } from "@/boxed";
+import { Provider } from "@/provider";
 import { decodeCBOR } from "./utils";
 
 import {
@@ -9,102 +9,132 @@ import {
   OrdSat,
   OrdBlock,
 } from "./types";
-import { ALKANES_PROVIDER } from "@/consts";
 
 export enum OrdFetchError {
   UnknownError = "UnknownError",
   RpcError = "RpcError",
 }
 
-export const ord_getInscriptions = (startingNumber?: string) =>
-  buildRpcCall<OrdPaginatedIds>("ord_inscriptions", [startingNumber ?? ""]);
+export class OrdRpcProvider {
+  constructor(private readonly provider: Provider) {}
 
-export const ord_getInscriptionsByBlockHash = (hash: string) =>
-  buildRpcCall<OrdBlock>("ord_block", [hash]);
-
-export const ord_getInscriptionsByBlockHeight = (
-  height: string,
-  page?: string
-) =>
-  buildRpcCall<OrdBlock>("ord_inscriptions:block", [
-    height,
-    ...(page ? [page] : []),
-  ]);
-
-export const ord_getInscriptionById = (id: string) =>
-  buildRpcCall<OrdInscription>("ord_inscription", [id]);
-
-export const ord_getInscriptionByNumber = (number: string) =>
-  buildRpcCall<OrdInscription>("ord_inscription", [number]);
-
-export const ord_getInscriptionContent = (id: string) =>
-  buildRpcCall<string>("ord_content", [id]);
-
-export const ord_getInscriptionPreview = (id: string) =>
-  buildRpcCall<string>("ord_preview", [id]);
-
-export const ord_getInscriptionChildren = (id: string, page?: string) =>
-  buildRpcCall<OrdPaginatedIds>("ord_r:children", [
-    id,
-    ...(page ? [page] : []),
-  ]);
-
-export const ord_getTxOutput = (txidVout: string) =>
-  buildRpcCall<OrdOutput>("ord_output", [txidVout]);
-
-export const ord_getSatByNumber = (n: string) =>
-  buildRpcCall<OrdSat>("ord_sat", [n]);
-
-export const ord_getSatByDecimal = (decimal: string) =>
-  buildRpcCall<OrdSat>("ord_sat", [decimal]);
-
-export const ord_getSatByDegree = (degree: string) =>
-  buildRpcCall<OrdSat>("ord_sat", [degree]);
-
-export const ord_getSatByName = (name: string) =>
-  buildRpcCall<OrdSat>("ord_sat", [name]);
-
-export const ord_getSatByPercentile = (percentile: string) =>
-  buildRpcCall<OrdSat>("ord_sat", [percentile]);
-
-export const ord_getInscriptionIdsBySat = (satNumber: string, page?: string) =>
-  buildRpcCall<OrdPaginatedIds>("ord_r:sat", [
-    satNumber,
-    ...(page ? [page] : []),
-  ]);
-
-export const ord_getInscriptionIdBySatAt = (
-  satNumber: string,
-  index?: string
-) =>
-  buildRpcCall<{ id: string }>("ord_r:sat::at", [
-    satNumber,
-    ...(index ? [index] : []),
-  ]);
-
-export const ord_getRuneByName = (name: string) =>
-  buildRpcCall<unknown>("ord_rune", [name]); // no schema yet
-
-export const ord_getRuneById = (id: string) =>
-  buildRpcCall<unknown>("ord_rune", [id]);
-
-export const ord_getRunes = () => buildRpcCall<unknown>("ord_runes");
-
-export const ord_getAddressData = (address: string) =>
-  buildRpcCall<unknown>("ord_address", [address]);
-
-export const ord_getInscriptionMetadata = async (id: string) => {
-  const hexResp = await buildRpcCall<string>("ord_r:metadata", [id]).call();
-  if (isBoxedError(hexResp)) return hexResp;
-
-  try {
-    return new BoxedSuccess(decodeCBOR(hexResp.data));
-  } catch (err) {
-    return new BoxedError(
-      OrdFetchError.UnknownError,
-      (err as Error)?.message ?? "Failed to decode CBOR"
-    );
+  private get rpc() {
+    return this.provider.buildRpcCall.bind(this.provider);
   }
-};
+
+  ord_getInscriptions(startingNumber?: string) {
+    return this.rpc<OrdPaginatedIds>("ord_inscriptions", [
+      startingNumber ?? "",
+    ]);
+  }
+
+  ord_getInscriptionsByBlockHash(blockHash: string) {
+    return this.rpc<OrdBlock>("ord_block", [blockHash]);
+  }
+
+  ord_getInscriptionsByBlockHeight(blockHeight: string, page?: string) {
+    return this.rpc<OrdBlock>("ord_inscriptions:block", [
+      blockHeight,
+      ...(page ? [page] : []),
+    ]);
+  }
+  ord_getInscriptionById(inscriptionId: string) {
+    return this.rpc<OrdInscription>("ord_inscription", [inscriptionId]);
+  }
+
+  ord_getInscriptionByNumber(inscriptionNumber: string) {
+    return this.rpc<OrdInscription>("ord_inscription", [inscriptionNumber]);
+  }
+
+  ord_getInscriptionContent(inscriptionId: string) {
+    return this.rpc<string>("ord_content", [inscriptionId]);
+  }
+
+  ord_getInscriptionPreview(inscriptionId: string) {
+    return this.rpc<string>("ord_preview", [inscriptionId]);
+  }
+
+  ord_getInscriptionChildren(inscriptionId: string, page?: string) {
+    return this.rpc<OrdPaginatedIds>("ord_r:children", [
+      inscriptionId,
+      ...(page ? [page] : []),
+    ]);
+  }
+
+  ord_getTxOutput(txidAndVout: string) {
+    return this.rpc<OrdOutput>("ord_output", [txidAndVout]);
+  }
+
+  ord_getSatByNumber(satoshiNumber: string) {
+    return this.rpc<OrdSat>("ord_sat", [satoshiNumber]);
+  }
+
+  ord_getSatByDecimal(decimalNotation: string) {
+    return this.rpc<OrdSat>("ord_sat", [decimalNotation]);
+  }
+
+  ord_getSatByDegree(degreeNotation: string) {
+    return this.rpc<OrdSat>("ord_sat", [degreeNotation]);
+  }
+
+  ord_getSatByName(satoshiName: string) {
+    return this.rpc<OrdSat>("ord_sat", [satoshiName]);
+  }
+
+  ord_getSatByPercentile(percentileString: string) {
+    return this.rpc<OrdSat>("ord_sat", [percentileString]);
+  }
+
+  ord_getInscriptionIdsBySat(satoshiNumber: string, page?: string) {
+    return this.rpc<OrdPaginatedIds>("ord_r:sat", [
+      satoshiNumber,
+      ...(page ? [page] : []),
+    ]);
+  }
+
+  ord_getInscriptionIdBySatAt(satoshiNumber: string, index?: string) {
+    return this.rpc<{ id: string }>("ord_r:sat::at", [
+      satoshiNumber,
+      ...(index ? [index] : []),
+    ]);
+  }
+
+  ord_getRuneByName(runeName: string) {
+    return this.rpc<unknown>("ord_rune", [runeName]);
+  }
+
+  ord_getRuneById(runeId: string) {
+    return this.rpc<unknown>("ord_rune", [runeId]);
+  }
+
+  ord_getRunes() {
+    return this.rpc<unknown>("ord_runes");
+  }
+
+  ord_getAddressData(address: string) {
+    return this.rpc<unknown>("ord_address", [address]);
+  }
+
+  async ord_getInscriptionMetadata(
+    inscriptionId: string
+  ): Promise<BoxedResponse<unknown, string>> {
+    const hexResponse = await this.rpc<string>("ord_r:metadata", [
+      inscriptionId,
+    ]).call();
+
+    if (isBoxedError(hexResponse)) return hexResponse;
+
+    try {
+      const decoded = decodeCBOR(hexResponse.data);
+      return new BoxedSuccess(decoded);
+    } catch (error) {
+      return new BoxedError(
+        OrdFetchError.UnknownError,
+        (error as Error).message ?? "Failed to decode CBOR"
+      );
+    }
+  }
+}
+
 export * from "./types";
 export * from "./utils";

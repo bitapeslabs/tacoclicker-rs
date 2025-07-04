@@ -1,18 +1,27 @@
 import * as bitcoin from "bitcoinjs-lib";
 import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
-import { getPath, WalletSigner } from "./wallet";
-import { NETWORK, CHOSEN_WALLET } from "@/consts";
 import { Account, SpendStrategy } from "@/libs/alkanes";
+import { Provider } from "@/provider";
+import type { BIP32Interface } from "bip32";
+
+export type WalletSigner = {
+  root: BIP32Interface;
+  xprv: BIP32Interface;
+  xpub: BIP32Interface;
+  seed: Buffer;
+};
 
 const makePath = (purpose: number, idx: number) =>
   `m/${purpose}'/0'/0'/0/${idx}`;
 
-export const getOylAccountFromSigner = (signer: WalletSigner): Account => {
+export const getOylAccountFromSigner = (
+  signer: WalletSigner,
+  provider: Provider
+): Account => {
   const { root } = signer;
-  const idx = CHOSEN_WALLET;
 
   const derive = (purpose: number) => {
-    const hdPath = makePath(purpose, idx);
+    const hdPath = makePath(purpose, 0);
     const node = root.derivePath(hdPath);
     return { node, hdPath };
   };
@@ -25,26 +34,26 @@ export const getOylAccountFromSigner = (signer: WalletSigner): Account => {
   const tapXOnly = toXOnly(Buffer.from(taprootNode.node.publicKey));
   const tapPay = bitcoin.payments.p2tr({
     internalPubkey: tapXOnly,
-    network: NETWORK,
+    network: provider.network,
   });
 
   const segwitPay = bitcoin.payments.p2wpkh({
     pubkey: Buffer.from(nativeSegwitNode.node.publicKey),
-    network: NETWORK,
+    network: provider.network,
   });
 
   const nestedRedeem = bitcoin.payments.p2wpkh({
     pubkey: Buffer.from(nestedSegwitNode.node.publicKey),
-    network: NETWORK,
+    network: provider.network,
   });
   const nestedPay = bitcoin.payments.p2sh({
     redeem: nestedRedeem,
-    network: NETWORK,
+    network: provider.network,
   });
 
   const legacyPay = bitcoin.payments.p2pkh({
     pubkey: Buffer.from(legacyNode.node.publicKey),
-    network: NETWORK,
+    network: provider.network,
   });
 
   const spendStrategy: SpendStrategy = {
@@ -76,7 +85,7 @@ export const getOylAccountFromSigner = (signer: WalletSigner): Account => {
       hdPath: legacyNode.hdPath,
     },
     spendStrategy,
-    network: NETWORK,
+    network: provider.network,
   };
 };
 
@@ -84,11 +93,10 @@ export const getOylSignerKeysFromWalletSigner = (
   walletSigner: WalletSigner
 ) => {
   const { root } = walletSigner; // BIP-32 master (xprv)
-  const idx = CHOSEN_WALLET; // which account the dApp/UI selected
 
   /** Derive the WIF-encoded priv-key for a given BIP-purpose */
   const deriveWif = (purpose: number): string => {
-    const node = root.derivePath(getPath());
+    const node = root.derivePath(makePath(1, 0));
     if (!node.privateKey)
       throw new Error(`Could not derive private key at m/${purpose}'/…`);
     return Buffer.from(node.privateKey).toString("hex");
