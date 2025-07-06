@@ -3,8 +3,15 @@ import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
 import { Account, SpendStrategy } from "tacoclicker-sdk";
 import { Provider } from "tacoclicker-sdk";
 import type { BIP32Interface } from "bip32";
-import { walletData } from "@/consts";
-
+import { Signer as OylSigner } from "@/libs/alkanes";
+import { provider, walletData } from "@/consts";
+import { AlkanesPayload } from "@/libs/alkanes/shared/types";
+import { gzip as _gzip } from "zlib";
+import { promisify } from "util";
+import { encipher, encodeRunestoneProtostone, ProtoStone } from "alkanes";
+import fs from "fs/promises";
+import path from "path";
+import { getPath } from "./wallet";
 export type WalletSigner = {
   root: BIP32Interface;
   xprv: BIP32Interface;
@@ -90,27 +97,61 @@ export const getOylAccountFromSigner = (
   };
 };
 
-export const getOylSignerKeysFromWalletSigner = (
+export const getOylSignerFromWalletSigner = (
   walletSigner: WalletSigner
-) => {
-  const { root } = walletSigner; // BIP-32 master (xprv)
+): OylSigner => {
+  const { root } = walletSigner;
 
-  /** Derive the WIF-encoded priv-key for a given BIP-purpose */
   const deriveWif = (purpose: number): string => {
-    const node = root.derivePath(makePath(1, 0));
+    const node = root.derivePath(getPath());
     if (!node.privateKey)
       throw new Error(`Could not derive private key at m/${purpose}'/…`);
     return Buffer.from(node.privateKey).toString("hex");
   };
 
-  // Build the keys object expected by Oyl-SDK’s Signer
   const keys = {
-    taprootPrivateKey: deriveWif(86), // BIP-86  (p2tr)
-    segwitPrivateKey: deriveWif(84), // BIP-84  (p2wpkh)
-    nestedSegwitPrivateKey: deriveWif(49), // BIP-49  (p2sh-p2wpkh)
-    legacyPrivateKey: deriveWif(44), // BIP-44  (p2pkh)
+    taprootPrivateKey: deriveWif(86),
+    segwitPrivateKey: deriveWif(84),
+    nestedSegwitPrivateKey: deriveWif(49),
+    legacyPrivateKey: deriveWif(44),
   };
 
-  // Hand everything to Oyl’s Signer
-  return keys;
+  return new OylSigner(provider.network, keys);
 };
+
+export interface AlkanesDeploymentParams {
+  contract: Uint8Array;
+  payload: AlkanesPayload;
+  protostone: Uint8Array;
+  callData: bigint[];
+}
+
+const gzip = promisify(_gzip);
+
+export async function getAlkanesDeploymentParamsFromWasmPath(
+  wasmPath: string,
+  callData: bigint[]
+): Promise<AlkanesDeploymentParams> {
+  const contract = new Uint8Array(
+    await fs.readFile(path.resolve(process.cwd(), wasmPath))
+  );
+  const payload: AlkanesPayload = {
+    body: await gzip(contract, { level: 9 }),
+    cursed: false,
+    tags: { contentType: "" }, // set if you want MIME-style tagging
+  };
+
+  const protostone = encodeRunestoneProtostone({
+    protostones: [
+      ProtoStone.message({
+        protocolTag: 1n,
+        edicts: [],
+        pointer: 0,
+        refundPointer: 0,
+        calldata: encipher(callData),
+      }),
+    ],
+  }).encodedRunestone;
+
+  return { contract, payload, protostone, callData };
+}

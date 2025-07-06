@@ -15,6 +15,7 @@ export class ElectrumApiProvider {
   private get electrumApiUrl(): string {
     return this.provider.electrumApiUrl.replace(/\/+$/, "");
   }
+
   async esplora_getaddress(
     address: string
   ): Promise<BoxedResponse<EsploraAddressResponse, EsploraFetchError>> {
@@ -50,6 +51,7 @@ export class ElectrumApiProvider {
 
     return new BoxedSuccess(satsToBTC(satoshiBalance));
   }
+
   async esplora_getutxos(
     address: string
   ): Promise<BoxedResponse<EsploraUtxo[], EsploraFetchError>> {
@@ -105,6 +107,7 @@ export class ElectrumApiProvider {
       );
     }
   }
+
   async esplora_broadcastTx(
     rawTransactionHex: string,
     customElectrumUrl?: string
@@ -139,6 +142,7 @@ export class ElectrumApiProvider {
       );
     }
   }
+
   async esplora_getaddresstxs(
     address: string,
     lastSeenTransactionId?: string
@@ -195,6 +199,55 @@ export class ElectrumApiProvider {
       );
     }
   }
+
+  async esplora_gettransaction(
+    transactionId: string
+  ): Promise<BoxedResponse<IEsploraTransaction, EsploraFetchError>> {
+    try {
+      const requestUrl = `${this.electrumApiUrl}/tx/${transactionId}`;
+      const httpResponse = await fetch(requestUrl);
+
+      if (!httpResponse.ok) {
+        return new BoxedError(
+          EsploraFetchError.UnknownError,
+          `Failed to fetch transaction ${transactionId} from ${requestUrl}: ${httpResponse.statusText}`
+        );
+      }
+
+      const transaction = (await httpResponse.json()) as IEsploraTransaction;
+      return new BoxedSuccess(transaction);
+    } catch (error) {
+      return new BoxedError(
+        EsploraFetchError.UnknownError,
+        `Failed to fetch transaction ${transactionId}: ${(error as Error).message}`
+      );
+    }
+  }
+
+  async esplora_getrawtransaction(
+    transactionId: string
+  ): Promise<BoxedResponse<string, EsploraFetchError>> {
+    try {
+      const requestUrl = `${this.electrumApiUrl}/tx/${transactionId}/hex`;
+      const httpResponse = await fetch(requestUrl);
+
+      if (!httpResponse.ok) {
+        return new BoxedError(
+          EsploraFetchError.UnknownError,
+          `Failed to fetch raw transaction ${transactionId} from ${requestUrl}: ${httpResponse.statusText}`
+        );
+      }
+
+      const rawHex = await httpResponse.text();
+      return new BoxedSuccess(rawHex);
+    } catch (error) {
+      return new BoxedError(
+        EsploraFetchError.UnknownError,
+        `Failed to fetch raw transaction ${transactionId}: ${(error as Error).message}`
+      );
+    }
+  }
+
   async esplora_getspendableinputs(
     utxoList: EsploraUtxo[]
   ): Promise<BoxedResponse<IEsploraSpendableUtxo[], EsploraFetchError>> {
@@ -223,6 +276,55 @@ export class ElectrumApiProvider {
       });
     }
     return new BoxedSuccess(spendableInputs);
+  }
+
+  esplora_getutxofromparenttx(
+    transaction: IEsploraTransaction,
+    voutIndex: number
+  ): BoxedResponse<EsploraUtxo, EsploraFetchError> {
+    const output = transaction.vout[voutIndex];
+    if (!output) {
+      return new BoxedError(
+        EsploraFetchError.UnknownError,
+        `Vout index ${voutIndex} not found in transaction ${transaction.txid}`
+      );
+    }
+
+    return new BoxedSuccess({
+      txid: transaction.txid,
+      vout: voutIndex,
+      value: output.value,
+      status: transaction.status,
+    } as EsploraUtxo);
+  }
+
+  async esplora_getutxo(
+    utxoString: string
+  ): Promise<BoxedResponse<EsploraUtxo, EsploraFetchError>> {
+    try {
+      if (!utxoString || !utxoString.includes(":")) {
+        return new BoxedError(
+          EsploraFetchError.UnknownError,
+          `Invalid UTXO format: ${utxoString}. Expected format is "txid:vout".`
+        );
+      }
+
+      const [transactionId, voutString] = utxoString.split(":");
+      const transactionResponse =
+        await this.esplora_gettransaction(transactionId);
+      if (isBoxedError(transactionResponse)) return transactionResponse;
+
+      const voutIndex = Number(voutString);
+      return this.esplora_getutxofromparenttx(
+        transactionResponse.data,
+        voutIndex
+      );
+    } catch (error) {
+      return new BoxedError(
+        EsploraFetchError.UnknownError,
+        `Failed to get UTXO: ${(error as Error).message}`
+      );
+    }
   }
 }
 

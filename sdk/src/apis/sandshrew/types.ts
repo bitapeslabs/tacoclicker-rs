@@ -15,3 +15,4 @@ export type FormattedUtxo = {
   prevTx: IEsploraTransaction;
   prevTxHex: string;
 };
+

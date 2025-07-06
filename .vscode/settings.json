@@ -1,13 +1,12 @@
 {
   "rust-analyzer.linkedProjects": [
     "contracts/tortilla/Cargo.toml",
-    "contracts/taqueria-factory/Cargo.toml",
+    "contracts/taqueria-factory/Cargo.toml"
   ],
-  "rust-analyzer.cargo.extraArgs": [
-    "--target", "wasm32-unknown-unknown"
-  ],
-    "rust-analyzer.cargo.extraEnv": {
-      "RA_SKIP_WASM_BUILD": "1"
-  }
-
+  "rust-analyzer.cargo.extraArgs": ["--target", "wasm32-unknown-unknown"],
+  "rust-analyzer.cargo.extraEnv": {
+    "RA_SKIP_WASM_BUILD": "1"
+  },
+  "typescript.tsserver.experimental.enableProjectDiagnostics": true,
+  "typescript.tsserver.useSeparateSyntaxServer": false
 }

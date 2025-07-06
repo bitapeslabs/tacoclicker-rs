@@ -1,11 +1,11 @@
-// rollup.config.mjs
 import dts from "rollup-plugin-dts";
 
 export default {
-  input: "dist/index.d.ts", // entry point for declarations
+  input: "dist/index.d.ts",
   output: {
-    file: "dist/index.d.ts", // overwrite with flattened file
+    file: "dist/index.d.ts", // flattened output
     format: "es",
   },
   plugins: [dts()],
+  preserveSymlinks: true, // <-- add this
 };

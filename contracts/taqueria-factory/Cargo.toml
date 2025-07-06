@@ -1,5 +1,5 @@
 [package]
-name = "taqueria-factory"
+name = "taqueria_factory"
 version = "0.1.0"
 edition = "2021"
 description = "Smart contract factory for taquerias."

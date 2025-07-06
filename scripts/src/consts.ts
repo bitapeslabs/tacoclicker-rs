@@ -1,6 +1,7 @@
 import * as bitcoin from "bitcoinjs-lib";
 import fs from "fs";
 import { Provider } from "tacoclicker-sdk";
+import { Provider as OylProvider } from "@/libs/alkanes";
 import { EncryptedMnemonic, encryptMnemonic } from "./crypto/wallet";
 
 if (
@@ -31,6 +32,16 @@ export const providers = {
   }),
 };
 
+export const oylProviders = {
+  boylnet: new OylProvider({
+    url: "https://boylnet.mezcal.sh/sandshrew",
+    projectId: "",
+    version: "",
+    network: bitcoin.networks.regtest,
+    networkType: "regtest",
+  }),
+};
+
 if (!process.env.NETWORK) {
   console.warn(
     "NETWORK environment variable is not set. Defaulting to 'boylnet'."
@@ -48,3 +59,5 @@ if (!providers[(process.env.NETWORK as keyof typeof providers) ?? "boylnet"]) {
 
 export const provider =
   providers[(process.env.NETWORK as keyof typeof providers) ?? "boylnet"];
+export const oylProvider =
+  oylProviders[(process.env.NETWORK as keyof typeof oylProviders) ?? "boylnet"];

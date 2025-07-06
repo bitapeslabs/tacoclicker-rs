@@ -8,7 +8,7 @@ import { EsploraUtxo } from "tacoclicker-sdk";
 import { BoxedResponse, BoxedError, BoxedSuccess } from "@/boxed";
 import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
 import { createHash } from "crypto";
-import { Account } from "@oyl/sdk";
+import { Account } from "@/libs/alkanes";
 import { getOylAccountFromSigner } from "./oyl";
 export const bip32 = BIP32Factory(ecc);
 bitcoin.initEccLib(ecc);
@@ -135,9 +135,7 @@ export const getTapInternalKey = (signer: WalletSigner) => {
   return Buffer.from(childNodeXOnlyPubkey);
 };
 
-export function getCurrentTaprootAddress(decrypted: DecryptedWallet): string {
-  const { signer } = decrypted;
-
+export function getCurrentTaprootAddress(signer: WalletSigner): string {
   const rootKey = signer.root;
 
   const childNode = rootKey.derivePath(getPath());

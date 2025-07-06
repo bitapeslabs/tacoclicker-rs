@@ -12,6 +12,25 @@ const sanitizedEnv = Object.fromEntries(
   )
 );
 
+const silentDotenvLogsPlugin = {
+  name: "silent-dotenv-logs",
+  setup(build) {
+    build.onLoad({ filter: /dotenv\/lib\/main\.js$/ }, async (args) => {
+      let contents = await fs.promises.readFile(args.path, "utf8");
+
+      // Replace log lines with no-ops
+      contents = contents
+        .replace(/console\.log\(.*?\);?/g, "")
+        .replace(/console\.error\(.*?\);?/g, "");
+
+      return {
+        contents,
+        loader: "js",
+      };
+    });
+  },
+};
+
 await build({
   entryPoints: ["src/index.ts"],
   outfile: "dist/index.js",
@@ -25,4 +44,5 @@ await build({
       JSON.stringify(val),
     ])
   ),
+  plugins: [silentDotenvLogsPlugin],
 });

@@ -182,9 +182,7 @@ export type AlkanesTraceEncodedEvent =
   | AlkanesTraceEncodedInvokeEvent
   | AlkanesTraceEncodedReturnEvent;
 
-export interface AlkanesTraceEncodedResult {
-  result: AlkanesTraceEncodedEvent[];
-}
+export type AlkanesTraceEncodedResult = AlkanesTraceEncodedEvent[];
 
 export interface AlkanesTraceCreateEvent {
   event: "create";
@@ -226,6 +224,4 @@ export type AlkanesTraceEvent =
   | AlkanesTraceInvokeEvent
   | AlkanesTraceReturnEvent;
 
-export interface AlkanesTraceResult {
-  result: AlkanesTraceEvent[];
-}
+export type AlkanesTraceResult = AlkanesTraceEvent[];
