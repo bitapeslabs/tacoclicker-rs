@@ -207,7 +207,7 @@ export interface AlkanesTraceInvokeEvent {
 export interface AlkanesTraceReturnEvent {
   event: "return";
   data: {
-    status: "success";
+    status: "success" | "revert";
     response: {
       alkanes: Alkane[];
       data: string;

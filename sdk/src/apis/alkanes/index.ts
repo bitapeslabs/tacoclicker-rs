@@ -1,5 +1,6 @@
 /* AlkanesProvider.ts ------------------------------------------------------ */
 import {
+  BoxedError,
   BoxedResponse,
   BoxedSuccess,
   consumeOrThrow,
@@ -14,13 +15,24 @@ import {
   AlkanesSimulationResult,
   AlkanesOutpoints,
   AlkanesTraceEncodedResult,
+  AlkanesTraceResult,
 } from "@/apis/alkanes/types";
-import { parseSimulateReturn, decodeAlkanesTrace } from "./utils";
+import {
+  parseSimulateReturn,
+  decodeAlkanesTrace,
+  extractAbiErrorMessage,
+} from "./utils";
 import { Provider } from "@/provider";
 
 export enum AlkanesFetchError {
   UnknownError = "UnknownError",
   RpcError = "RpcError",
+}
+
+export enum AlkanesTraceError {
+  DecodeError = "DecodeError",
+  NoTraceFound = "NoTraceFound",
+  TransactionReverted = "TransactionReverted",
 }
 
 export class AlkanesRpcProvider {
@@ -70,14 +82,67 @@ export class AlkanesRpcProvider {
     const leTxid = Buffer.from(txid, "hex").reverse().toString("hex");
     return {
       payload: ["alkanes_trace", [{ txid: leTxid, vout }]],
-      call: async () => {
-        return decodeAlkanesTrace(
-          consumeOrThrow(
+      call: async (): Promise<
+        BoxedResponse<AlkanesTraceResult, AlkanesTraceError>
+      > => {
+        try {
+          const encoded = consumeOrThrow(
             await this.rpc<AlkanesTraceEncodedResult>("alkanes_trace", [
               { txid: leTxid, vout },
             ]).call()
-          )
-        );
+          );
+
+          let decoded = decodeAlkanesTrace(encoded);
+
+          if (decoded.length === 0) {
+            return new BoxedError(
+              AlkanesTraceError.NoTraceFound,
+              "No trace found for the given txid and vout"
+            );
+          }
+
+          let returnEvent = decoded.find(
+            (traceEvent) => traceEvent.event === "return"
+          );
+
+          let encodedReturnEvent = encoded.find(
+            (traceEvent) => traceEvent.event === "return"
+          );
+
+          if (!returnEvent || !encodedReturnEvent) {
+            return new BoxedError(
+              AlkanesTraceError.DecodeError,
+              "No return event found in alkanes trace"
+            );
+          }
+
+          let isError = returnEvent?.data.status !== "success"; //errors if the return event isnt found or status is revert
+
+          if (isError) {
+            let errorMessage;
+            try {
+              errorMessage = extractAbiErrorMessage(
+                encodedReturnEvent.data.response.data
+              );
+            } catch (err) {
+              console.log(returnEvent.data.response);
+              console.log(err);
+              errorMessage = "Unknown error decoding alkanes trace";
+            }
+
+            return new BoxedError(
+              AlkanesTraceError.TransactionReverted,
+              `Transaction reverted with message: ${errorMessage}`
+            );
+          }
+
+          return new BoxedSuccess(decoded);
+        } catch (err) {
+          return new BoxedError(
+            AlkanesTraceError.DecodeError,
+            (err as Error).message ?? "Unknown error decoding alkanes trace"
+          );
+        }
       },
     };
   }

@@ -98,10 +98,6 @@ function deepHexToBigInt<T>(value: T): unknown {
   return value;
 }
 
-/**
- * Top-level helper that takes an encoded trace and returns a fully-decoded trace,
- * where every little-endian hex string has become a `bigint`.
- */
 export function decodeAlkanesTrace(
   encoded: AlkanesTraceEncodedResult
 ): AlkanesTraceResult {
@@ -109,4 +105,35 @@ export function decodeAlkanesTrace(
   // but TS needs a cast to satisfy the compiler.
   const decoded = deepHexToBigInt(encoded) as unknown as AlkanesTraceResult;
   return decoded;
+}
+
+export function extractAbiErrorMessage(data: string): string | null {
+  if (!data?.startsWith("0x")) return null;
+  const hex = data.slice(2).toLowerCase();
+  const ERROR_SELECTOR = "08c379a0";
+  if (hex.length < 8 || !hex.startsWith(ERROR_SELECTOR)) return null;
+
+  const body = hex.slice(8);
+
+  const hexToUtf8 = (h: string): string =>
+    decodeURIComponent(
+      h.replace(/(..)/g, "%$1") // percent-encode every byte
+    );
+
+  if (body.length >= 128 && body.startsWith("0".repeat(62) + "20")) {
+    const lenHex = body.slice(64, 128);
+    const len = parseInt(lenHex, 16);
+    const strHex = body.slice(128, 128 + len * 2);
+    try {
+      return hexToUtf8(strHex);
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    return hexToUtf8(body);
+  } catch {
+    return null;
+  }
 }

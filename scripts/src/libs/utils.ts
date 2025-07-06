@@ -7,11 +7,20 @@ import chalk from "chalk";
 import { walletSigner } from "@/crypto/wallet";
 import { getAlkanesDeploymentParamsFromWasmPath } from "@/crypto/oyl";
 import { oylProvider, provider } from "@/consts";
-import { consumeOrThrow, retryOnBoxedError } from "@/boxed";
+import {
+  consumeOrThrow,
+  isBoxedError,
+  retryOnBoxedError,
+  BoxedSuccess,
+} from "@/boxed";
 import { getCurrentTaprootAddress } from "@/crypto/wallet";
 import { getOylSignerFromWalletSigner } from "@/crypto/oyl";
 import { contractDeployment } from "@/libs/alkanes/contract";
-import { AlkaneId, AlkanesTraceResult } from "tacoclicker-sdk";
+import {
+  AlkaneId,
+  AlkanesTraceError,
+  AlkanesTraceResult,
+} from "tacoclicker-sdk";
 
 const execPromise = promisify(exec);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -21,11 +30,20 @@ export const waitForTrace = async (
 ): Promise<AlkanesTraceResult> => {
   let traceResult: AlkanesTraceResult | undefined;
   while (traceResult === undefined) {
-    let traceResults = await Promise.all([
-      provider.trace(txid, 3),
-      provider.trace(txid, 4),
-    ]);
-    traceResult = traceResults.find((result) => result.length);
+    let traceResults = (
+      await Promise.all([provider.trace(txid, 3), provider.trace(txid, 4)])
+    ).filter((result) => {
+      if (isBoxedError(result)) {
+        if (result.errorType === AlkanesTraceError.TransactionReverted) {
+          throw new Error(result.message);
+        }
+        return false;
+      }
+      return true;
+    }) as BoxedSuccess<AlkanesTraceResult>[]; //Safe because isBoxedError checks
+
+    traceResult = traceResults.find((result) => result.data.length)?.data;
+
     await sleep(2000);
   }
   return traceResult;
