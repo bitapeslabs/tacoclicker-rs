@@ -1,15 +1,15 @@
-import { Provider } from "../provider";
-import { Account } from "../account";
+import { IOylProvider } from "../provider/types";
+import { IAccount } from "../account/types";
 import * as bitcoin from "bitcoinjs-lib";
-import { formatInputsToSign } from "../shared/utils";
+import { formatInputsToSign } from "../base/utils";
 import { FormattedUtxo } from "../utxo/types";
-import { addInputForUtxo } from "../base";
+import { addInputForUtxo } from "../base/utils";
 
 export async function createRBFPsbt(
   txid: string,
   new_fee_rate: number,
-  account: Account,
-  provider: Provider
+  account: IAccount,
+  provider: IOylProvider
 ) {
   const txHex = await provider.sandshrew.bitcoindRpc.getRawTransaction?.(
     txid,

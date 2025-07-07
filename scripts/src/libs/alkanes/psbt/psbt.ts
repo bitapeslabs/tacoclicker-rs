@@ -1,12 +1,13 @@
 import * as bitcoin from "bitcoinjs-lib";
-import { Provider } from "../provider";
-import { provider } from "@/consts";
+import { IOylProvider } from "../provider/types";
+
+const DEFAULT_FEE_RATE = 5; // sat/vbyte
 
 // Fee estimation
 
 type BasePsbtParams = {
   feeRate?: number;
-  provider: Provider;
+  provider: IOylProvider;
   fee?: number;
 };
 
@@ -21,7 +22,7 @@ export const psbtBuilder = async <T extends BasePsbtParams>(
   const { psbt } = await psbtBuilder(params);
 
   const { fee: actualFee } = await getEstimatedFee({
-    feeRate: params.feeRate ?? provider.defaultFeeRate,
+    feeRate: params.feeRate ?? DEFAULT_FEE_RATE,
     psbt,
     provider: params.provider,
   });
@@ -32,7 +33,7 @@ export const psbtBuilder = async <T extends BasePsbtParams>(
   });
 
   const { fee: finalFee, vsize } = await getEstimatedFee({
-    feeRate: params.feeRate ?? provider.defaultFeeRate,
+    feeRate: params.feeRate ?? DEFAULT_FEE_RATE,
     psbt: finalPsbt,
     provider: params.provider,
   });
@@ -129,7 +130,7 @@ export const getEstimatedFee = async ({
 }: {
   feeRate: number;
   psbt: string;
-  provider: Provider;
+  provider: IOylProvider;
 }) => {
   const psbtObj = bitcoin.Psbt.fromBase64(psbt, { network: provider.network });
 

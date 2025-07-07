@@ -1,8 +1,6 @@
 import * as bitcoin from "bitcoinjs-lib";
 import ECPairFactory from "ecpair";
 import {
-  AddressType,
-  DecodedCBOR,
   IBlockchainInfoUTXO,
   Network,
   RuneUtxo,
@@ -15,10 +13,9 @@ import { maximumScriptBytes } from "./constants";
 import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
 import { SandshrewBitcoinClient } from "../rpclient/sandshrew";
 import { EsploraRpc } from "../rpclient/esplora";
-import { Provider } from "../provider";
-import { addressFormats } from "@sadoprotocol/ordit-sdk";
+import { IOylProvider } from "../provider/types";
+import { AddressType } from "../account/types";
 import { encodeRunestone, RunestoneSpec } from "@magiceden-oss/runestone-lib";
-import { AddressKey } from "../account";
 import * as CBOR from "cbor-x";
 import { FormattedUtxo } from "../utxo";
 import { ecc } from "@/crypto/ecc";
@@ -89,7 +86,7 @@ export async function getFee({
   psbt,
   feeRate,
 }: {
-  provider: Provider;
+  provider: IOylProvider;
   psbt: string;
   feeRate: number;
 }) {
@@ -264,37 +261,6 @@ export function calculateAmountGatheredUtxo(utxoArray: FormattedUtxo[]) {
     0
   );
 }
-
-export const formatInputsToSign = async ({
-  _psbt,
-  senderPublicKey,
-  network,
-}: {
-  _psbt: bitcoin.Psbt;
-  senderPublicKey: string;
-  network: bitcoin.Network;
-}) => {
-  let index = 0;
-  for await (const v of _psbt.data.inputs) {
-    const isSigned = v.finalScriptSig || v.finalScriptWitness;
-    const lostInternalPubkey = !v.tapInternalKey;
-    if (!isSigned || lostInternalPubkey) {
-      const tapInternalKey = toXOnly(Buffer.from(senderPublicKey, "hex"));
-      const p2tr = bitcoin.payments.p2tr({
-        internalPubkey: tapInternalKey,
-        network: network,
-      });
-      if (
-        v.witnessUtxo?.script.toString("hex") === p2tr.output?.toString("hex")
-      ) {
-        v.tapInternalKey = tapInternalKey;
-      }
-    }
-    index++;
-  }
-
-  return _psbt;
-};
 
 export const timeout = async (n: number) =>
   await new Promise((resolve) => setTimeout(resolve, n));
@@ -507,96 +473,6 @@ export const createRuneEtchScript = ({
   return runeEtch;
 };
 
-export function getAddressType(address: string): AddressType | null {
-  if (
-    addressFormats.mainnet.p2pkh.test(address) ||
-    addressFormats.testnet.p2pkh.test(address) ||
-    addressFormats.regtest.p2pkh.test(address)
-  ) {
-    return AddressType.P2PKH;
-  } else if (
-    addressFormats.mainnet.p2tr.test(address) ||
-    addressFormats.testnet.p2tr.test(address) ||
-    addressFormats.regtest.p2tr.test(address)
-  ) {
-    return AddressType.P2TR;
-  } else if (
-    addressFormats.mainnet.p2sh.test(address) ||
-    addressFormats.testnet.p2sh.test(address) ||
-    addressFormats.regtest.p2sh.test(address)
-  ) {
-    return AddressType.P2SH_P2WPKH;
-  } else if (
-    addressFormats.mainnet.p2wpkh.test(address) ||
-    addressFormats.testnet.p2wpkh.test(address) ||
-    addressFormats.regtest.p2wpkh.test(address)
-  ) {
-    return AddressType.P2WPKH;
-  } else {
-    return null;
-  }
-}
-
-export function getAddressKey(address: string): AddressKey | null {
-  const addressType = getAddressType(address);
-  switch (addressType) {
-    case AddressType.P2WPKH:
-      return "nativeSegwit";
-    case AddressType.P2SH_P2WPKH:
-      return "nestedSegwit";
-    case AddressType.P2TR:
-      return "taproot";
-    case AddressType.P2PKH:
-      return "legacy";
-    default:
-      return null;
-  }
-}
-
-export async function waitForTransaction({
-  txId,
-  sandshrewBtcClient,
-}: {
-  txId: string;
-  sandshrewBtcClient: SandshrewBitcoinClient;
-}) {
-  const timeout = 60000; // 1 minute in milliseconds
-  const startTime = Date.now();
-
-  while (true) {
-    try {
-      const result = await sandshrewBtcClient?.bitcoindRpc?.getMemPoolEntry?.(
-        txId
-      );
-
-      if (result) {
-        await delay(5000);
-        return result;
-      }
-
-      // Check for timeout
-      if (Date.now() - startTime > timeout) {
-        throw new Error(
-          `Timeout: Could not find transaction in mempool: ${txId}`
-        );
-      }
-
-      // Wait for 5 seconds before retrying
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-    } catch (error) {
-      // Check for timeout
-      if (Date.now() - startTime > timeout) {
-        throw new Error(
-          `Timeout: Could not find transaction in mempool: ${txId}`
-        );
-      }
-
-      // Wait for 5 seconds before retrying
-      await new Promise((resolve) => setTimeout(resolve, 5000));
-    }
-  }
-}
-
 export async function getOutputValueByVOutIndex({
   txId,
   vOut,
@@ -759,11 +635,6 @@ export function findXAmountOfSats(utxos: FormattedUtxo[], target: number) {
   };
 }
 
-export function decodeCBOR(hex: string): DecodedCBOR {
-  const buffer = Buffer.from(hex, "hex");
-  return CBOR.decode(buffer);
-}
-
 export const getVSize = (data: Buffer) => {
   let totalSize = data.length;
   if (totalSize < 0xfd) {
@@ -797,7 +668,3 @@ export const packUTF8 = function (s: any) {
       ""
   );
 };
-
-export function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}

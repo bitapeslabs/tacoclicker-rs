@@ -1,10 +1,10 @@
-import { Provider } from "../provider";
-import { Account, AddressKey, SpendStrategy } from "../account";
+import { OylProvider } from "../provider";
+import { IAccount, IAddressKey, ISpendStrategy } from "../account/types";
 import asyncPool from "tiny-async-pool";
 import { OrdOutput } from "../rpclient/ord";
-import { getAddressKey } from "../shared/utils";
+import { getAddressKey } from "../account/utils";
 import { AlkanesByAddressResponse, AlkanesOutpoint } from "../types";
-import { toTxId } from "../base";
+import { toTxId } from "../base/utils";
 import { OylTransactionError } from "../shared/errors";
 import { EsploraUtxo } from "../rpclient/esplora";
 import {
@@ -19,8 +19,8 @@ export const accountBalance = async ({
   account,
   provider,
 }: {
-  account: Account;
-  provider: Provider;
+  account: IAccount;
+  provider: OylProvider;
 }) => {
   let confirmedAmount: number = 0;
   let pendingAmount: number = 0;
@@ -53,7 +53,7 @@ export const addressBalance = async ({
   provider,
 }: {
   address: string;
-  provider: Provider;
+  provider: OylProvider;
 }) => {
   let confirmedAmount: number = 0;
   let pendingAmount: number = 0;
@@ -104,8 +104,8 @@ export const addressUtxos = async ({
   spendStrategy,
 }: {
   address: string;
-  provider: Provider;
-  spendStrategy?: SpendStrategy;
+  provider: OylProvider;
+  spendStrategy?: ISpendStrategy;
 }): Promise<AddressUtxoPortfolio> => {
   let spendableTotalBalance: number = 0;
   let pendingTotalBalance: number = 0;
@@ -336,15 +336,15 @@ export const accountUtxos = async ({
   account,
   provider,
 }: {
-  account: Account;
-  provider: Provider;
+  account: IAccount;
+  provider: OylProvider;
 }): Promise<AccountUtxoPortfolio> => {
   const accountUtxos: FormattedUtxo[] = [];
   const accountSpendableTotalUtxos = [];
   let accountSpendableTotalBalance = 0;
   let accountPendingTotalBalance = 0;
   let accountTotalBalance = 0;
-  const accounts = {} as Record<AddressKey, AddressUtxoPortfolio>;
+  const accounts = {} as Record<IAddressKey, AddressUtxoPortfolio>;
   const addresses = [
     { addressKey: "nativeSegwit", address: account.nativeSegwit.address },
     { addressKey: "nestedSegwit", address: account.nestedSegwit.address },
@@ -400,12 +400,12 @@ export const accountUtxos = async ({
 
 export const selectUtxos = (
   utxos: FormattedUtxo[],
-  spendStrategy: SpendStrategy
+  spendStrategy: ISpendStrategy
 ) => {
   const addressMap = new Map<string, FormattedUtxo[]>();
 
   utxos.forEach((utxo) => {
-    const addressKey = getAddressKey(utxo.address) ?? ("" as AddressKey);
+    const addressKey = getAddressKey(utxo.address) ?? ("" as IAddressKey);
 
     if (spendStrategy.addressOrder.includes(addressKey)) {
       if (!addressMap.has(addressKey)) {
@@ -423,46 +423,6 @@ export const selectUtxos = (
         (spendStrategy.utxoSortGreatestToLeast ? a.satoshis : b.satoshis)
     );
   });
-};
-
-export const selectSpendableUtxos = (
-  utxos: FormattedUtxo[],
-  spendStrategy: SpendStrategy
-): GatheredUtxos => {
-  const paymentUtxos = utxos.filter(
-    (u) =>
-      u.indexed &&
-      u.inscriptions.length <= 0 &&
-      Object.keys(u.runes).length <= 0 &&
-      Object.keys(u.alkanes).length <= 0 &&
-      u.satoshis !== 546 &&
-      u.satoshis !== 330
-  );
-
-  const buckets = new Map<string, FormattedUtxo[]>();
-
-  for (const u of paymentUtxos) {
-    const key = getAddressKey(u.address);
-    if (!key) continue;
-    if (!spendStrategy.addressOrder.includes(key)) continue;
-    (buckets.get(key) ?? buckets.set(key, []).get(key)!).push(u);
-  }
-
-  const orderedUtxos = spendStrategy.addressOrder.flatMap((key) => {
-    const list = buckets.get(key) ?? [];
-    return list.sort((a, b) =>
-      spendStrategy.utxoSortGreatestToLeast
-        ? b.satoshis - a.satoshis
-        : a.satoshis - b.satoshis
-    );
-  });
-
-  const totalAmount = orderedUtxos.reduce(
-    (sum, { satoshis }) => sum + satoshis,
-    0
-  );
-
-  return { utxos: orderedUtxos, totalAmount };
 };
 
 export const selectAlkanesUtxos = ({

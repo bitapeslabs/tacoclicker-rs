@@ -1,6 +1,6 @@
 import { AlkanesSimulationResult } from "@/apis";
 import { hexToUint8Array } from "@/utils";
-
+import { Expand } from "@/utils";
 export class DecodableAlkanesResponse {
   public readonly bytes: Uint8Array;
 
@@ -68,3 +68,7 @@ export class DecodableAlkanesResponse {
     return this.bytes;
   }
 }
+
+export type IDecodableAlkanesResponse = Expand<
+  (typeof DecodableAlkanesResponse)["prototype"]
+>;

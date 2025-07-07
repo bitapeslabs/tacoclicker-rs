@@ -1,42 +1,17 @@
+import { getOylAccountFromSigner } from "../oyl";
 import * as bip39 from "bip39";
 import { BIP32Factory, BIP32Interface } from "bip32";
 import * as bitcoin from "bitcoinjs-lib";
 import * as crypto from "crypto";
-import { ecc } from "./ecc";
-import { walletData, provider } from "@/consts";
+import { ecc } from "@/crypto/ecc";
+import { walletData, provider, getPath } from "@/consts";
 import { EsploraUtxo } from "tacoclicker-sdk";
 import { BoxedResponse, BoxedError, BoxedSuccess } from "@/boxed";
 import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
 import { createHash } from "crypto";
-import { Account } from "@/libs/alkanes";
-import { getOylAccountFromSigner } from "./oyl";
+import { IAccount } from "@/libs/alkanes/account/types";
+import { EncryptedMnemonic, WalletSigner, DecryptedWallet } from "./types";
 export const bip32 = BIP32Factory(ecc);
-bitcoin.initEccLib(ecc);
-
-export const getPath = (): string => {
-  return `m/86'/0'/0'/0/${walletData.index}`;
-}; // BIP86
-
-export type WalletSigner = {
-  root: BIP32Interface;
-  xprv: BIP32Interface;
-  xpub: BIP32Interface;
-  seed: Buffer;
-};
-
-export type DecryptedWallet = {
-  mnemonic: string;
-  signer: WalletSigner;
-};
-
-export type EncryptedMnemonic = {
-  kdf: string;
-  cipher: string;
-  salt: string;
-  iv: string;
-  tag: string;
-  data: string;
-};
 
 export function getSigner(mnemonic: string): WalletSigner {
   const seed = bip39.mnemonicToSeedSync(mnemonic);
@@ -185,7 +160,7 @@ export const getTaprootWalletSigner = (): DecryptedWallet => {
 };
 
 type BrowserLikeWalletSigner = {
-  oyl: Account;
+  oyl: IAccount;
   signer: WalletSigner;
   signPsbt: (unsignedPsbtBase64: string) => Promise<string>;
 };
@@ -194,18 +169,24 @@ export async function signPsbt(
   base64Psbt: string,
   walletSigner: WalletSigner
 ): Promise<string> {
-  console.log("Signing PSBT for seller input...");
-  // Validate the input PSBT
-  const psbt = bitcoin.Psbt.fromBase64(base64Psbt, {
-    network: provider.network,
-  });
+  try {
+    // Validate the input PSBT
+    const psbt = bitcoin.Psbt.fromBase64(base64Psbt, {
+      network: provider.network,
+    });
 
-  const signer = toTaprootSigner(walletSigner);
+    const signer = toTaprootSigner(walletSigner);
 
-  psbt.signAllInputs(signer);
-  psbt.finalizeAllInputs();
+    psbt.signAllInputs(signer);
+    psbt.finalizeAllInputs();
 
-  return psbt.extractTransaction().toHex();
+    let tx = psbt.extractTransaction().toHex();
+
+    return tx;
+  } catch (error) {
+    console.error("Error signing PSBT:", error);
+    throw new Error("Failed to sign PSBT");
+  }
 }
 
 const taprootDecryptedWallet = getTaprootWalletSigner();

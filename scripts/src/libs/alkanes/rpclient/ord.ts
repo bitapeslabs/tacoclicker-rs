@@ -1,5 +1,22 @@
-import { RuneName } from "../utxo/types";
-import { decodeCBOR } from "../shared/utils";
+import * as CBOR from "cbor-x";
+
+export type DecodedCBORValue =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | DecodedCBOR
+  | DecodedCBORValue[];
+
+export interface DecodedCBOR {
+  [key: string]: DecodedCBORValue;
+}
+
+export function decodeCBOR(hex: string): DecodedCBOR {
+  const buffer = Buffer.from(hex, "hex");
+  return CBOR.decode(buffer);
+}
 
 export type OrdOutputRune = {
   amount: number;
@@ -10,7 +27,7 @@ export interface OrdOutput {
   address: string;
   indexed: boolean;
   inscriptions: string[];
-  runes: Record<RuneName, OrdOutputRune>;
+  runes: Record<string, OrdOutputRune>;
   sat_ranges: number[][];
   script_pubkey: string;
   spent: boolean;

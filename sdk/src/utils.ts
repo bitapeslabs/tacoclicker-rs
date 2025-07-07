@@ -21,3 +21,4 @@ export function excludeFields<K, T extends object>(
   }
   return filtered as K;
 }
+export type Expand<T> = T extends infer O ? { [K in keyof O]: O[K] } : never;

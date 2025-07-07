@@ -1,5 +1,5 @@
 import { BoxedResponse, BoxedSuccess, BoxedError } from "@/boxed";
-
+import { Expand } from "@/utils";
 function encodeStringToU128Array(str: string): bigint[] {
   const encoder = new TextEncoder();
   const data = encoder.encode(str);
@@ -89,3 +89,5 @@ export class Encodable {
     return new BoxedSuccess(result);
   }
 }
+
+export type IEncodable = Expand<(typeof Encodable)["prototype"]>;

@@ -1,6 +1,10 @@
 import fetch from "node-fetch";
-import { AbstractFetchResponse, IRpcMethods } from "../shared/types";
-import { sleep } from "../shared/utils";
+import { AbstractFetchResponse, IRpcMethods } from "./types";
+
+//to avoid circular imports
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export class SandshrewBitcoinClient {
   public apiUrl: string;

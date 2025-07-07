@@ -1,5 +1,5 @@
 import fetch from "node-fetch";
-import { AbstractFetchResponse } from "../shared/types";
+import { AbstractFetchResponse } from "./types";
 export interface EsploraTx {
   txid: string;
   version: number;

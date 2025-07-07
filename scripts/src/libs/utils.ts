@@ -1,161 +1,111 @@
+// libs/utils/deployContract.ts
 import { exec } from "child_process";
 import { promisify } from "util";
 import fs from "fs/promises";
 import path from "path";
-import ora from "ora";
 import chalk from "chalk";
-import { walletSigner } from "@/crypto/wallet";
-import { getAlkanesDeploymentParamsFromWasmPath } from "@/crypto/oyl";
+
+import {
+  getAlkanesDeploymentParamsFromWasmPath,
+  getOylSignerFromWalletSigner,
+} from "@/crypto/oyl";
+import { walletSigner, getCurrentTaprootAddress } from "@/crypto/wallet";
 import { oylProvider, provider } from "@/consts";
-import {
-  consumeOrThrow,
-  isBoxedError,
-  retryOnBoxedError,
-  BoxedSuccess,
-} from "@/boxed";
-import { getCurrentTaprootAddress } from "@/crypto/wallet";
-import { getOylSignerFromWalletSigner } from "@/crypto/oyl";
+import { consumeOrThrow } from "@/boxed";
 import { contractDeployment } from "@/libs/alkanes/contract";
-import {
-  AlkaneId,
-  AlkanesTraceError,
-  AlkanesTraceResult,
-} from "tacoclicker-sdk";
+import { taskLogger as logger } from "@/consts";
+
+import { AlkaneId, AlkanesParsedTraceResult } from "tacoclicker-sdk";
 
 const execPromise = promisify(exec);
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-export const waitForTrace = async (
-  txid: string
-): Promise<AlkanesTraceResult> => {
-  let traceResult: AlkanesTraceResult | undefined;
-  while (traceResult === undefined) {
-    let traceResults = (
-      await Promise.all([provider.trace(txid, 3), provider.trace(txid, 4)])
-    ).filter((result) => {
-      if (isBoxedError(result)) {
-        if (result.errorType === AlkanesTraceError.TransactionReverted) {
-          throw new Error(result.message);
-        }
-        return false;
-      }
-      return true;
-    }) as BoxedSuccess<AlkanesTraceResult>[]; //Safe because isBoxedError checks
-
-    traceResult = traceResults.find((result) => result.data.length)?.data;
-
-    await sleep(2000);
-  }
-  return traceResult;
-};
-
-const INDENT = 2; // how many spaces to indent sub-tasks
-const task = chalk.bold.cyan; // style for the top-level task label
-const note = (s: string) => chalk.dim("· " + s); // subtle bullet for secondary notes
 
 export const deployContract = async (
   cargoProjectPath: string,
   extraCallData: bigint[] = []
 ): Promise<AlkaneId> => {
-  let contractName = path.basename(cargoProjectPath);
-  console.log(task(`\n▶ deploy ${contractName}`)); // ——— top-level task banner
+  const contractName = path.basename(cargoProjectPath);
+  const root = logger.start(`deploy ${contractName}`);
 
-  /* -------------------------------------------------- build WASM */
-  const buildSpinner = ora({
-    text: note("building contract"),
-    indent: INDENT,
-  }).start();
   try {
+    /* ── build ─────────────────────────────── */
+    const buildSpin = logger.progress("building contract…");
     await execPromise("cargo build --target wasm32-unknown-unknown --release", {
       cwd: cargoProjectPath,
     });
-    buildSpinner.succeed(chalk.green("contract built"));
-  } catch (err) {
-    buildSpinner.fail(chalk.red("build failed"));
-    throw err instanceof Error ? err : new Error(String(err));
-  }
+    buildSpin.succeed("contract built");
 
-  /* -------------------------------------------------- locate artifact */
-  const wasmDir = path.join(
-    cargoProjectPath,
-    "target",
-    "wasm32-unknown-unknown",
-    "release"
-  );
-  const wasmFiles = (await fs.readdir(wasmDir)).filter((f) =>
-    f.endsWith(".wasm")
-  );
-  if (wasmFiles.length === 0) {
-    throw new Error(`no .wasm artifact found in ${wasmDir}`);
-  }
-  const wasmPath = path.join(wasmDir, wasmFiles[0]);
-  console.log(note(`found WASM → ${path.basename(wasmPath)}`));
-
-  /* -------------------------------------------------- create payload */
-  const { payload, protostone } = await getAlkanesDeploymentParamsFromWasmPath(
-    wasmPath,
-    [1n, 0n, ...(extraCallData ?? [])]
-  );
-
-  /* -------------------------------------------------- gather UTXOs */
-  const formattedUtxos = consumeOrThrow(
-    await provider.rpc.sandshrew.sandshrew_getFormattedUtxosForAddress(
-      getCurrentTaprootAddress(walletSigner.signer)
-    )
-  );
-  const gatheredUtxos = {
-    utxos: formattedUtxos,
-    totalAmount: formattedUtxos.reduce((sum, u) => sum + u.satoshis, 0),
-  };
-  console.log(
-    note(
-      `gathered ${chalk.yellow(gatheredUtxos.utxos.length)} UTXO${
-        gatheredUtxos.utxos.length !== 1 ? "s" : ""
-      } (${gatheredUtxos.totalAmount} sats)`
-    )
-  );
-
-  /* -------------------------------------------------- broadcast tx */
-  const { oyl: oylAccount, signer: taprootSigner } = walletSigner;
-  const oylSigner = getOylSignerFromWalletSigner(taprootSigner);
-
-  const { txId } = await contractDeployment({
-    signer: oylSigner,
-    account: oylAccount,
-    payload,
-    protostone: Buffer.from(protostone),
-    utxos: gatheredUtxos.utxos,
-    provider: oylProvider,
-    feeRate: 10, // sat/vB
-  });
-
-  console.log(note(`broadcast ${chalk.blue(txId)}, waiting for confirmation…`));
-
-  /* -------------------------------------------------- wait for confirmation */
-  while (true) {
-    const tx = consumeOrThrow(
-      await retryOnBoxedError({
-        intervalMs: 1000,
-        timeoutMs: 10000,
-      })(() => provider.rpc.electrum.esplora_gettransaction(txId))
+    /* ── locate wasm ───────────────────────── */
+    const wasmDir = path.join(
+      cargoProjectPath,
+      "target",
+      "wasm32-unknown-unknown",
+      "release"
     );
-    if (tx?.status.confirmed) break;
-    await sleep(4_000);
+    const files = (await fs.readdir(wasmDir)).filter((f) =>
+      f.endsWith(".wasm")
+    );
+    if (!files.length) throw new Error(`no .wasm in ${wasmDir}`);
+    const wasmPath = path.join(wasmDir, files[0]);
+    logger.info(`found ${path.basename(wasmPath)}`);
+
+    /* ── payload / protostone ──────────────── */
+    const { payload, protostone } =
+      await getAlkanesDeploymentParamsFromWasmPath(wasmPath, [
+        1n,
+        0n,
+        ...extraCallData,
+      ]);
+
+    /* ── gather UTXOs ──────────────────────── */
+    const utxos = consumeOrThrow(
+      await provider.rpc.sandshrew.sandshrew_getFormattedUtxosForAddress(
+        getCurrentTaprootAddress(walletSigner.signer)
+      )
+    );
+    const total = utxos.reduce((s, u) => s + u.satoshis, 0);
+    logger.info(
+      `gathered ${chalk.yellow(utxos.length)} UTXO${
+        utxos.length === 1 ? "" : "s"
+      } (${total} sats)`
+    );
+
+    /* ── broadcast tx ──────────────────────── */
+    const broadcastSpin = logger.progress("broadcasting tx…");
+    const { oyl: account, signer } = walletSigner;
+    const { txId } = await contractDeployment({
+      signer: getOylSignerFromWalletSigner(signer),
+      account,
+      payload,
+      protostone: Buffer.from(protostone),
+      utxos,
+      provider: oylProvider,
+      feeRate: provider.defaultFeeRate, // sat/vB
+    });
+    broadcastSpin.succeed(`txid ${chalk.blue(txId)}`);
+
+    /* ── confirmation ─────────────────────── */
+    const confirmSpin = logger.progress("waiting for confirmation…");
+    await provider.waitForConfirmation(txId);
+    confirmSpin.succeed("transaction confirmed");
+
+    /* ── trace result ──────────────────────── */
+    const traceSpin = logger.progress("waiting for trace…");
+    const events: AlkanesParsedTraceResult = consumeOrThrow(
+      await provider.waitForTraceResult(txId)
+    );
+    traceSpin.stop(); // use stop() because we print success just after
+
+    if (!events.create) throw new Error("no `create` event in trace output");
+
+    const { block, tx } = events.create as { block: bigint; tx: bigint };
+    const alkaneId: AlkaneId = { block, tx };
+
+    logger.success(`contract deployed at block ${block}, tx ${tx}`);
+    root.close();
+    return alkaneId;
+  } catch (err) {
+    logger.error(err as Error);
+    root.close();
+    throw err;
   }
-  console.log(note("confirmed — waiting for trace…"));
-
-  /* -------------------------------------------------- wait for trace */
-  const events: AlkanesTraceResult = await waitForTrace(txId);
-  const create = events.find((e) => e.event === "create");
-  if (!create) throw new Error("no `create` event found in trace output");
-
-  const { block, tx } = create.data as { block: bigint; tx: bigint };
-  const alkaneId: AlkaneId = { block, tx };
-
-  console.log(
-    chalk.green(
-      `✓ contract deployed at block ${block.toString()}, tx ${tx.toString()}\n`
-    )
-  );
-  return alkaneId;
 };

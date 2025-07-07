@@ -1,9 +1,9 @@
-import { SandshrewBitcoinClient } from "./rpclient/sandshrew";
-import { EsploraRpc } from "./rpclient/esplora";
-import { OrdRpc } from "./rpclient/ord";
+import { SandshrewBitcoinClient } from "../rpclient/sandshrew";
+import { EsploraRpc } from "../rpclient/esplora";
+import { OrdRpc } from "../rpclient/ord";
 import * as bitcoin from "bitcoinjs-lib";
-import { waitForTransaction } from "./shared/utils";
-import { AlkanesRpc } from "./rpclient/alkanes";
+import { waitForTransaction } from "../shared/baseutils";
+import { AlkanesRpc } from "../rpclient/alkanes";
 
 export type ProviderConstructorArgs = {
   url: string;
@@ -14,7 +14,7 @@ export type ProviderConstructorArgs = {
   apiProvider?: any;
 };
 
-export class Provider {
+export class OylProvider {
   public sandshrew: SandshrewBitcoinClient;
   public esplora: EsploraRpc;
   public ord: OrdRpc;

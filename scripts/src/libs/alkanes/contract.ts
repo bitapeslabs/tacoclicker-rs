@@ -1,6 +1,6 @@
-import { Account } from "./account";
+import { IAccount } from "./account/types";
 import { Signer } from "./signer";
-import { Provider } from "./provider";
+import { OylProvider } from "./provider";
 import * as bitcoin from "bitcoinjs-lib";
 import { AlkanesPayload } from "./shared/types";
 import { timeout, tweakSigner } from "./shared/utils";
@@ -24,9 +24,9 @@ export const contractDeployment = async ({
 }: {
   payload: AlkanesPayload;
   utxos: FormattedUtxo[];
-  account: Account;
+  account: IAccount;
   protostone: Buffer;
-  provider: Provider;
+  provider: OylProvider;
   feeRate?: number;
   signer: Signer;
 }) => {
@@ -54,59 +54,6 @@ export const contractDeployment = async ({
   return { ...reveal, commitTx: txId };
 };
 
-export const actualDeployCommitFee = async ({
-  payload,
-  tweakedPublicKey,
-  utxos,
-  account,
-  provider,
-  feeRate,
-}: {
-  payload: AlkanesPayload;
-  tweakedPublicKey: string;
-  utxos: FormattedUtxo[];
-  account: Account;
-  provider: Provider;
-  feeRate?: number;
-}) => {
-  if (!feeRate) {
-    feeRate = (await provider.esplora.getFeeEstimates())["1"] as number;
-  }
-
-  const { psbt } = await createDeployCommitPsbt({
-    payload,
-    utxos,
-    tweakedPublicKey,
-    account,
-    provider,
-    feeRate,
-  });
-
-  const { fee: estimatedFee } = await getEstimatedFee({
-    feeRate,
-    psbt,
-    provider,
-  });
-
-  const { psbt: finalPsbt } = await createDeployCommitPsbt({
-    payload,
-    utxos,
-    tweakedPublicKey,
-    account,
-    provider,
-    feeRate,
-    fee: estimatedFee,
-  });
-
-  const { fee: finalFee, vsize } = await getEstimatedFee({
-    feeRate,
-    psbt: finalPsbt,
-    provider,
-  });
-
-  return { fee: finalFee, vsize };
-};
-
 export const actualDeployRevealFee = async ({
   protostone,
   tweakedPublicKey,
@@ -121,7 +68,7 @@ export const actualDeployRevealFee = async ({
   commitTxId: string;
   receiverAddress: string;
   script: Buffer;
-  provider: Provider;
+  provider: OylProvider;
   feeRate?: number;
 }) => {
   if (!feeRate) {
@@ -176,8 +123,8 @@ export const deployReveal = async ({
   protostone: Buffer;
   commitTxId: string;
   script: string;
-  account: Account;
-  provider: Provider;
+  account: IAccount;
+  provider: OylProvider;
   feeRate?: number;
   signer: Signer;
 }) => {

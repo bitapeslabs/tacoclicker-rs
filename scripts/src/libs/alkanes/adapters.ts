@@ -2,7 +2,6 @@ import fs from "fs/promises";
 import path from "path";
 import { promisify } from "util";
 import { gzip as _gzip } from "zlib";
-import { FormattedUtxo } from "@/libs/alkanes";
 import { AlkanesPayload } from "./shared/types";
 import { encodeRunestoneProtostone, ProtoStone, encipher } from "alkanes";
 

@@ -1,12 +1,10 @@
-import { AddressKey } from "../account";
+import { IAddressKey } from "../account/types";
 import { OrdOutputRune } from "../rpclient/ord";
 
 export interface GatheredUtxos {
   utxos: FormattedUtxo[];
   totalAmount: number;
 }
-
-export type RuneName = string;
 
 export type AlkaneReadableId = string;
 
@@ -17,7 +15,7 @@ export interface FormattedUtxo {
   scriptPk: string;
   address: string;
   inscriptions: string[];
-  runes: Record<RuneName, OrdOutputRune>;
+  runes: Record<string, OrdOutputRune>;
   alkanes: Record<AlkaneReadableId, AlkanesUtxoEntry>;
   confirmations: number;
   indexed: boolean;
@@ -41,7 +39,7 @@ export interface AccountUtxoPortfolio {
   accountSpendableTotalUtxos: FormattedUtxo[];
   accountSpendableTotalBalance: number;
   accountPendingTotalBalance: number;
-  accounts: Record<AddressKey, AddressUtxoPortfolio>;
+  accounts: Record<IAddressKey, AddressUtxoPortfolio>;
 }
 
 export type AlkanesUtxoEntry = {

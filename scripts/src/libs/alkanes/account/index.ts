@@ -4,6 +4,14 @@ import { BIP32Factory } from "bip32";
 const bip32 = BIP32Factory(ecc);
 import * as bip39 from "bip39";
 import * as dotenv from "dotenv";
+import {
+  HDPaths,
+  MnemonicToAccountOptions,
+  IAccount,
+  IAddressKey,
+  WalletStandard,
+} from "./types";
+
 dotenv.config();
 
 const makeHdPaths = (
@@ -21,59 +29,6 @@ const makeHdPaths = (
 };
 const buf = (u: Uint8Array): Buffer => Buffer.from(u);
 const toXOnly = (pub: Buffer) => (pub.length === 32 ? pub : pub.slice(1, 33));
-
-export type Account = {
-  taproot: {
-    pubkey: string;
-    pubKeyXOnly: string;
-    address: string;
-    hdPath: string;
-  };
-  nativeSegwit: {
-    pubkey: string;
-    address: string;
-    hdPath: string;
-  };
-  nestedSegwit: {
-    pubkey: string;
-    address: string;
-    hdPath: string;
-  };
-  legacy: {
-    pubkey: string;
-    address: string;
-    hdPath: string;
-  };
-  spendStrategy: SpendStrategy;
-  network: bitcoin.Network;
-};
-
-export type AddressKey = "nativeSegwit" | "taproot" | "nestedSegwit" | "legacy";
-
-export type WalletStandard =
-  | "bip44_account_last"
-  | "bip44_standard"
-  | "bip32_simple";
-
-export type HDPaths = {
-  legacy?: string;
-  nestedSegwit?: string;
-  nativeSegwit?: string;
-  taproot?: string;
-};
-
-export interface SpendStrategy {
-  addressOrder: AddressKey[];
-  utxoSortGreatestToLeast: boolean;
-  changeAddress: AddressKey;
-}
-
-export interface MnemonicToAccountOptions {
-  network?: bitcoin.networks.Network;
-  index?: number;
-  spendStrategy?: SpendStrategy;
-  hdPaths?: HDPaths;
-}
 
 export const generateMnemonic = (bitsize?: 128 | 256) => {
   if (bitsize && bitsize !== 128 && bitsize !== 256) {
@@ -94,7 +49,7 @@ export const mnemonicToAccount = ({
 }: {
   mnemonic?: string;
   opts?: MnemonicToAccountOptions;
-}): Account => {
+}): IAccount => {
   const options = {
     network: opts?.network ? opts.network : bitcoin.networks.bitcoin,
     index: opts?.index ? opts.index : 0,
@@ -107,7 +62,7 @@ export const mnemonicToAccount = ({
             "nestedSegwit",
             "legacy",
             "taproot",
-          ] as AddressKey[]),
+          ] as IAddressKey[]),
       utxoSortGreatestToLeast:
         opts?.spendStrategy?.utxoSortGreatestToLeast !== undefined
           ? opts.spendStrategy.utxoSortGreatestToLeast
@@ -164,7 +119,7 @@ export const generateWallet = ({
 }: {
   mnemonic?: string;
   opts: MnemonicToAccountOptions;
-}): Account => {
+}): IAccount => {
   if (!mnemonic) throw new Error("mnemonic not given");
 
   const hdPaths = { ...getHDPaths(opts.index, opts.network), ...opts.hdPaths };

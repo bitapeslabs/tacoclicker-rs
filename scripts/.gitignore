@@ -2,3 +2,5 @@ node_modules
 dist
 .env
 package-lock.json
+meta.json
+stats.html

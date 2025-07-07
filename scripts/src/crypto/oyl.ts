@@ -4,20 +4,14 @@ import { Account, SpendStrategy } from "tacoclicker-sdk";
 import { Provider } from "tacoclicker-sdk";
 import type { BIP32Interface } from "bip32";
 import { Signer as OylSigner } from "@/libs/alkanes";
-import { provider, walletData } from "@/consts";
+import { provider, getPath } from "@/consts";
 import { AlkanesPayload } from "@/libs/alkanes/shared/types";
 import { gzip as _gzip } from "zlib";
 import { promisify } from "util";
 import { encipher, encodeRunestoneProtostone, ProtoStone } from "alkanes";
 import fs from "fs/promises";
 import path from "path";
-import { getPath } from "./wallet";
-export type WalletSigner = {
-  root: BIP32Interface;
-  xprv: BIP32Interface;
-  xpub: BIP32Interface;
-  seed: Buffer;
-};
+import { WalletSigner } from "./wallet/types";
 
 const makePath = (purpose: number, idx: number) =>
   `m/${purpose}'/0'/0'/0/${idx}`;

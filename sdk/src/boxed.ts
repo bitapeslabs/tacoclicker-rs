@@ -110,28 +110,33 @@ export function consumeUntilSuccess<T, E extends string | number>(
   });
 }
 
-type IBoxedTimeoutOpts = {
+type IBoxedRetryOpts = {
   intervalMs?: number;
   timeoutMs?: number;
 };
 
 const DEFAULT_INTERVAL = 1000;
 const DEFAULT_TIMEOUT = 10000;
-
-export function retryOnBoxedError(timeOpts?: IBoxedTimeoutOpts) {
+export function retryOnBoxedError(timeOpts?: IBoxedRetryOpts) {
   const interval = timeOpts?.intervalMs ?? DEFAULT_INTERVAL;
   const timeout = timeOpts?.timeoutMs ?? DEFAULT_TIMEOUT;
 
   return async function <T, E extends string | number>(
     fn: () => Promise<BoxedResponse<T, E>>,
-    onRetry?: (attempt: number, err: BoxedError<E>, fnName: string) => void
+    onRetry?: (attempt: number, err: BoxedError<E>, fnName: string) => void,
+    returnErrors: E[] = []
   ): Promise<BoxedResponse<T, E>> {
+    const errorSet = new Set(returnErrors);
     const start = Date.now();
     let attempt = 0;
 
     while (Date.now() - start < timeout) {
       const res = await fn();
-      if (!isBoxedError(res)) return res;
+      if (
+        !isBoxedError(res) ||
+        (isBoxedError(res) && errorSet.has(res.errorType)) //Will skip onretry aswell
+      )
+        return res;
 
       onRetry?.(attempt, res, fn.name);
       attempt++;
@@ -148,7 +153,7 @@ export function retryOnBoxedError(timeOpts?: IBoxedTimeoutOpts) {
 // -----------------------------------------------------------------------------
 // retryOrThrow  – timeOpts?  →  <T,E>(fn, onRetry?) => Promise<T>
 // -----------------------------------------------------------------------------
-export function retryOrThrow(timeOpts?: IBoxedTimeoutOpts) {
+export function retryOrThrow(timeOpts?: IBoxedRetryOpts) {
   return async function <T, E extends string | number>(
     fn: () => Promise<BoxedResponse<T, E>>,
     onRetry?: (attempt: number, err: BoxedError<E>, fnName: string) => void
@@ -156,4 +161,27 @@ export function retryOrThrow(timeOpts?: IBoxedTimeoutOpts) {
     const resp = await retryOnBoxedError(timeOpts)<T, E>(fn, onRetry);
     return consumeOrThrow(resp);
   };
+}
+
+type SuccessPayload<T> =
+  T extends IBoxedSuccess<infer R> //  ← matches status: true
+    ? R
+    : never;
+
+/* ────────────────────────────────────────────────────────────── */
+/* 2.  Tuple-aware consumer — still zero `any`                    */
+/* ────────────────────────────────────────────────────────────── */
+
+export function consumeAll<
+  const T extends readonly BoxedResponse<unknown, string | number>[],
+>(
+  tuple: T,
+  consumeFn: <U, E extends string | number>(
+    boxed: BoxedResponse<U, E>
+  ) => U = consumeOrThrow
+): { [K in keyof T]: SuccessPayload<T[K]> } {
+  // run the consumer for every element
+  const out = tuple.map(consumeFn);
+  // re-tag the array as the same-length tuple
+  return out as unknown as { [K in keyof T]: SuccessPayload<T[K]> };
 }

@@ -1,40 +1,25 @@
 import * as bitcoin from "bitcoinjs-lib";
-import fs from "fs";
-import { Provider } from "tacoclicker-sdk";
-import { Provider as OylProvider } from "@/libs/alkanes";
-import { EncryptedMnemonic, encryptMnemonic } from "./crypto/wallet";
+import * as tacoclickerLib from "tacoclicker-sdk";
+import * as alkanesLib from "@/libs/alkanes";
+import { walletData, NETWORK } from "./env"; // ← new
+import { TaskLogger } from "@/logger";
+import { ecc } from "./crypto/ecc";
+bitcoin.initEccLib(ecc);
 
-if (
-  !process.env.BOYL_WALLET_PATH ||
-  !process.env.BOYL_WALLET_PASSWORD ||
-  !process.env.BOYL_WALLET_INDEX
-) {
-  throw new Error(
-    "BOYL wallet configurations are incomplete. Please set BOYL_WALLET_PATH, BOYL_WALLET_PASSWORD, and BOYL_WALLET_INDEX in your environment variables."
-  );
-}
-
-export const walletData = {
-  encryptedMnemonic: JSON.parse(
-    fs.readFileSync(process.env.BOYL_WALLET_PATH, "utf-8")
-  ).encryptedMnemonic as EncryptedMnemonic,
-  password: process.env.BOYL_WALLET_PASSWORD || "",
-  index: process.env.BOYL_WALLET_INDEX || "0",
-};
-
+/* providers ------------------------------------------------------------- */
 export const providers = {
-  boylnet: new Provider({
+  boylnet: new tacoclickerLib.Provider({
     sandshrewUrl: "https://boynet.mezcal.sh/sandshrew",
     electrumApiUrl: "https://boynet.mezcal.sh/esplora",
     network: bitcoin.networks.regtest,
     explorerUrl: "https://boynet.mezcal.sh",
-    defaultFeeRate: 5, // Default fee rate in sat/vbyte
+    defaultFeeRate: 5,
   }),
 };
 
 export const oylProviders = {
-  boylnet: new OylProvider({
-    url: "https://boylnet.mezcal.sh/sandshrew",
+  boylnet: new alkanesLib.OylProvider({
+    url: "https://boynet.mezcal.sh/sandshrew",
     projectId: "",
     version: "",
     network: bitcoin.networks.regtest,
@@ -42,22 +27,16 @@ export const oylProviders = {
   }),
 };
 
-if (!process.env.NETWORK) {
-  console.warn(
-    "NETWORK environment variable is not set. Defaulting to 'boylnet'."
-  );
-}
-if (!providers[(process.env.NETWORK as keyof typeof providers) ?? "boylnet"]) {
+if (!providers[NETWORK as keyof typeof providers]) {
   throw new Error(
-    `Network ${
-      process.env.NETWORK
-    } is not supported. Available networks: ${Object.keys(providers).join(
-      ", "
-    )}`
+    `Network "${NETWORK}" not supported. Available: ${Object.keys(providers)}`
   );
 }
 
-export const provider =
-  providers[(process.env.NETWORK as keyof typeof providers) ?? "boylnet"];
-export const oylProvider =
-  oylProviders[(process.env.NETWORK as keyof typeof oylProviders) ?? "boylnet"];
+export const provider = providers[NETWORK as keyof typeof providers];
+export const oylProvider = oylProviders[NETWORK as keyof typeof oylProviders];
+export const taskLogger = new TaskLogger();
+export { walletData };
+export const getPath = (): string => {
+  return `m/86'/0'/0'/0/${walletData.index}`;
+}; // BIP86

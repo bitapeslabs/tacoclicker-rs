@@ -8,7 +8,7 @@ import { z } from "zod";
 import { u128Schema } from "../schemas";
 import { DecodableAlkanesResponse } from "../decoders";
 import { Encodable } from "../encoders";
-import { AlkanesBaseContract } from "./base";
+import { AlkanesBaseContract, AlkanesPushExecuteResponse } from "./base";
 import { AlkanesSimulationError } from "./base";
 import { AlkanesExecuteError } from "../alkanes";
 
@@ -75,20 +75,38 @@ import { AlkanesExecuteError } from "../alkanes";
 //Implements free_mint.wasm methods
 
 export class BaseTokenContract extends AlkanesBaseContract {
+  public get OpCodes() {
+    return {
+      Initialize: 0n,
+      MintTokens: 77n,
+      GetName: 99n,
+      GetSymbol: 100n,
+      GetTotalSupply: 101n,
+      GetCap: 102n,
+      GetMinted: 103n,
+      GetValuePerMint: 104n,
+      GetData: 1000n,
+    } as const;
+  }
+
+  public get decimals(): number {
+    return 8;
+  }
+
   async initialize(
     address: string,
     params: {
-      token_units?: bigint;
-      value_per_mint?: bigint;
+      premine?: bigint;
+      valuePerMint?: bigint;
       cap?: bigint;
       name: string;
       symbol: string;
     }
-  ): Promise<BoxedResponse<boolean, AlkanesExecuteError>> {
+  ): Promise<BoxedResponse<AlkanesPushExecuteResponse, AlkanesExecuteError>> {
     try {
       let paramSchema = z.object({
-        token_units: u128Schema.optional(),
-        value_per_mint: u128Schema.optional(),
+        premine: u128Schema.optional(),
+        valuePerMint: u128Schema.optional(),
         cap: u128Schema.optional(),
         name: z.string(),
         symbol: z.string(),
@@ -109,23 +127,29 @@ export class BaseTokenContract extends AlkanesBaseContract {
         new Encodable(parsedParams.data.symbol).fromChar()
       );
 
+      let premine =
+        (parsedParams.data.premine ?? 0n) * 10n ** BigInt(this.decimals);
+
+      let valuePerMint =
+        (parsedParams.data.valuePerMint ?? 0n) * 10n ** BigInt(this.decimals);
+
       let callData: bigint[] = [
-        0n, // opcode for Initialize
-        parsedParams.data.token_units ?? 0n,
-        parsedParams.data.value_per_mint ?? 0n,
+        this.OpCodes.Initialize, // opcode for Initialize
+        premine,
+        valuePerMint,
         parsedParams.data.cap ?? 0n,
         ...nameEncoded,
         ...symbolEncoded,
       ];
 
-      consumeOrThrow(
+      let response = consumeOrThrow(
         await this.pushExecute({
           address,
           callData,
         })
       );
 
-      return new BoxedSuccess(true);
+      return new BoxedSuccess(response);
     } catch (error) {
       return new BoxedError(
         AlkanesExecuteError.UnknownError,
@@ -135,35 +159,19 @@ export class BaseTokenContract extends AlkanesBaseContract {
   }
 
   async mintTokens(
-    address: string,
-    params: { amount?: bigint }
-  ): Promise<BoxedResponse<boolean, AlkanesExecuteError>> {
+    address: string
+  ): Promise<BoxedResponse<AlkanesPushExecuteResponse, AlkanesExecuteError>> {
     try {
-      let paramSchema = z.object({
-        amount: u128Schema.optional(),
-      });
+      let callData: bigint[] = [this.OpCodes.MintTokens]; // opcode for MintTokens
 
-      const parsedParams = paramSchema.safeParse(params);
-      if (!parsedParams.success) {
-        return new BoxedError(
-          AlkanesExecuteError.InvalidParams,
-          "Invalid parameters: " + parsedParams.error.message
-        );
-      }
-
-      let callData: bigint[] = [77n]; // opcode for MintTokens
-      if (parsedParams.data.amount !== undefined) {
-        callData.push(parsedParams.data.amount);
-      }
-
-      consumeOrThrow(
+      let response = consumeOrThrow(
         await this.pushExecute({
           address,
           callData,
         })
       );
 
-      return new BoxedSuccess(true);
+      return new BoxedSuccess(response);
     } catch (error) {
       return new BoxedError(
         AlkanesExecuteError.UnknownError,
@@ -173,7 +181,7 @@ export class BaseTokenContract extends AlkanesBaseContract {
   }
   async viewGetName(): Promise<BoxedResponse<string, AlkanesSimulationError>> {
     try {
-      let callData: bigint[] = [99n]; // opcode for GetName
+      let callData: bigint[] = [this.OpCodes.GetName]; // opcode for GetName
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
@@ -196,7 +204,7 @@ export class BaseTokenContract extends AlkanesBaseContract {
     BoxedResponse<string, AlkanesSimulationError>
   > {
     try {
-      let callData: bigint[] = [100n]; // opcode for GetSymbol
+      let callData: bigint[] = [this.OpCodes.GetSymbol]; // opcode for GetSymbol
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
@@ -219,7 +227,7 @@ export class BaseTokenContract extends AlkanesBaseContract {
     BoxedResponse<number, AlkanesSimulationError>
   > {
     try {
-      let callData: bigint[] = [101n];
+      let callData: bigint[] = [this.OpCodes.GetTotalSupply];
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
@@ -228,7 +236,9 @@ export class BaseTokenContract extends AlkanesBaseContract {
       );
 
       return new BoxedSuccess(
-        new DecodableAlkanesResponse(simulationResult).toTokenValue(8)
+        new DecodableAlkanesResponse(simulationResult).toTokenValue(
+          this.decimals
+        )
       );
     } catch (error) {
       return new BoxedError(
@@ -240,7 +250,7 @@ export class BaseTokenContract extends AlkanesBaseContract {
 
   async viewGetCap(): Promise<BoxedResponse<number, AlkanesSimulationError>> {
     try {
-      let callData: bigint[] = [102n]; // opcode for GetCap
+      let callData: bigint[] = [this.OpCodes.GetCap]; // opcode for GetCap
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
@@ -249,7 +259,7 @@ export class BaseTokenContract extends AlkanesBaseContract {
       );
 
       return new BoxedSuccess(
-        new DecodableAlkanesResponse(simulationResult).toTokenValue(8)
+        new DecodableAlkanesResponse(simulationResult).toTokenValue(0)
       );
     } catch (error) {
       return new BoxedError(
@@ -262,7 +272,7 @@ export class BaseTokenContract extends AlkanesBaseContract {
     BoxedResponse<number, AlkanesSimulationError>
   > {
     try {
-      let callData: bigint[] = [103n]; // opcode for GetMinted
+      let callData: bigint[] = [this.OpCodes.GetMinted]; // opcode for GetMinted
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
@@ -271,7 +281,7 @@ export class BaseTokenContract extends AlkanesBaseContract {
       );
 
       return new BoxedSuccess(
-        new DecodableAlkanesResponse(simulationResult).toTokenValue(8)
+        new DecodableAlkanesResponse(simulationResult).toTokenValue(0)
       );
     } catch (error) {
       return new BoxedError(
@@ -285,7 +295,7 @@ export class BaseTokenContract extends AlkanesBaseContract {
     BoxedResponse<number, AlkanesSimulationError>
   > {
     try {
-      let callData: bigint[] = [104n]; // opcode for GetValuePerMint
+      let callData: bigint[] = [this.OpCodes.GetValuePerMint]; // opcode for GetValuePerMint
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
@@ -294,7 +304,9 @@ export class BaseTokenContract extends AlkanesBaseContract {
       );
 
       return new BoxedSuccess(
-        new DecodableAlkanesResponse(simulationResult).toTokenValue(8)
+        new DecodableAlkanesResponse(simulationResult).toTokenValue(
+          this.decimals
+        )
       );
     } catch (error) {
       return new BoxedError(
@@ -308,7 +320,7 @@ export class BaseTokenContract extends AlkanesBaseContract {
     BoxedResponse<Uint8Array, AlkanesSimulationError>
   > {
     try {
-      let callData: bigint[] = [1000n]; // opcode for GetData
+      let callData: bigint[] = [this.OpCodes.GetData]; // opcode for GetData
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,

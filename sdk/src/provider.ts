@@ -1,14 +1,31 @@
 import type { Network as BitcoinNetwork } from "bitcoinjs-lib";
 import {
   RpcCall,
-  RpcTuple,
   buildRpcCall as sandshrewBuildRpcCall,
 } from "@/apis/sandshrew/shared";
 
 import { execute, simulate } from "@/libs/alkanes";
-import { retryOnBoxedError } from "@/boxed";
+import {
+  retryOnBoxedError,
+  BoxedResponse,
+  BoxedSuccess,
+  BoxedError,
+  isBoxedError,
+  consumeOrThrow,
+} from "@/boxed";
 
-import { AlkanesRpcProvider, BaseRpcProvider } from "./apis";
+import {
+  AlkanesRpcProvider,
+  AlkanesTraceCreateEvent,
+  AlkanesTraceInvokeEvent,
+  AlkanesTraceReturnEvent,
+  BaseRpcProvider,
+  AlkanesTraceError,
+  AlkanesTraceResult,
+  IEsploraTransaction,
+} from "./apis";
+
+import { sleep } from "@/utils";
 
 export interface ProviderConfig {
   sandshrewUrl: string;
@@ -18,6 +35,16 @@ export interface ProviderConfig {
   defaultFeeRate?: number;
   btcTicker?: string;
 }
+
+enum AlkanesPollError {
+  UnknownError = "UnknownError",
+}
+
+export type AlkanesParsedTraceResult = {
+  create?: AlkanesTraceCreateEvent["data"];
+  invoke?: AlkanesTraceInvokeEvent["data"];
+  return: AlkanesTraceReturnEvent["data"];
+};
 
 export class Provider {
   readonly sandshrewUrl: string;
@@ -58,7 +85,14 @@ export class Provider {
     return retryOnBoxedError({
       intervalMs: this.INTERVAL_MS,
       timeoutMs: this.TIMEOUT_MS,
-    })(() => execute({ provider: this, ...config }));
+    })(
+      () => execute({ provider: this, ...config }),
+      (attempt) => {
+        console.warn(
+          `EXECUTE: Attempt ${attempt + 1}: Failed to execute request. Retrying...`
+        );
+      }
+    );
   }
   simulate(
     request: Parameters<typeof simulate>[1]
@@ -66,7 +100,14 @@ export class Provider {
     return retryOnBoxedError({
       intervalMs: this.INTERVAL_MS,
       timeoutMs: this.TIMEOUT_MS,
-    })(() => simulate(this, request));
+    })(
+      () => simulate(this, request),
+      (attempt) => {
+        console.warn(
+          `SIMULATE: Attempt ${attempt + 1}: Failed to simulate request. Retrying...`
+        );
+      }
+    );
   }
 
   trace(
@@ -77,6 +118,89 @@ export class Provider {
     return retryOnBoxedError({
       intervalMs: this.INTERVAL_MS,
       timeoutMs: this.TIMEOUT_MS,
-    })(() => this.rpc.alkanes.alkanes_trace(...args).call());
+    })(
+      () => this.rpc.alkanes.alkanes_trace(...args).call(),
+      (attempt) => {
+        console.warn(
+          `TRACE: Attempt ${attempt + 1}: Failed to fetch trace for txid: ${args[0]}. Retrying...`
+        );
+      },
+      [AlkanesTraceError.TransactionReverted, AlkanesTraceError.NoTraceFound]
+    );
   }
+
+  waitForTraceResult = async (
+    txid: string
+  ): Promise<BoxedResponse<AlkanesParsedTraceResult, AlkanesTraceError>> => {
+    let result: AlkanesParsedTraceResult | undefined = undefined;
+    let maxAttempts = 300;
+    while (result === undefined) {
+      let traceResults = await Promise.all([
+        this.trace(txid, 3),
+        this.trace(txid, 4),
+      ]);
+
+      let errors = traceResults.filter(isBoxedError);
+      let success = (
+        traceResults.filter((result) => !isBoxedError(result)) as
+          | BoxedSuccess<AlkanesTraceResult>[]
+          | undefined
+      )?.[0]?.data;
+
+      let revertError = errors.find(
+        (result) => result.errorType === AlkanesTraceError.TransactionReverted
+      );
+      if (revertError) {
+        return revertError;
+      }
+
+      if (success) {
+        const createEvent = success.find((e) => e.event === "create");
+        const invokeEvent = success.find((e) => e.event === "invoke")!; //There will always be an invoke event
+        const returnEvent = success.find((e) => e.event === "return")!; //There will always be a return event
+
+        result = {
+          create: createEvent?.data,
+          invoke: invokeEvent?.data,
+          return: returnEvent?.data,
+        };
+      }
+
+      if (maxAttempts-- <= 0) {
+        return new BoxedError(
+          AlkanesTraceError.NoTraceFound,
+          "No trace found for the given txid after 300 attempts"
+        );
+      }
+
+      await sleep(2000);
+    }
+    return new BoxedSuccess(result);
+  };
+
+  waitForConfirmation = async (
+    txid: string
+  ): Promise<BoxedResponse<boolean, AlkanesPollError>> => {
+    try {
+      let tx: IEsploraTransaction | undefined = undefined;
+      while (!tx?.status.confirmed) {
+        tx = consumeOrThrow(
+          await retryOnBoxedError({
+            intervalMs: 1000,
+            timeoutMs: 10000,
+          })(() => this.rpc.electrum.esplora_gettransaction(txid))
+        );
+
+        if (tx?.status.confirmed) break;
+        await sleep(4_000);
+      }
+      return new BoxedSuccess(true);
+    } catch (err) {
+      return new BoxedError(
+        AlkanesPollError.UnknownError,
+        "An error ocurred while waiting for tx confirmation: " +
+          (err as Error).message
+      );
+    }
+  };
 }

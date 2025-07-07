@@ -5,21 +5,35 @@ import {
   BoxedError,
   consumeOrThrow,
 } from "@/boxed";
-import { AlkaneId, AlkanesTraceResult } from "@/apis";
+import {
+  AlkaneId,
+  AlkanesTraceCreateEvent,
+  AlkanesTraceInvokeEvent,
+  AlkanesTraceResult,
+  AlkanesTraceReturnEvent,
+} from "@/apis";
 import { Provider } from "@/provider";
 import { Psbt } from "bitcoinjs-lib";
 import { AlkanesTraceError } from "@/apis";
 import { hexToUint8Array, sleep } from "@/utils";
 import { AlkanesExecuteError } from "../alkanes";
-import { DecodableAlkanesResponse } from "../decoders";
+import {
+  IDecodableAlkanesResponse,
+  DecodableAlkanesResponse,
+} from "../decoders";
+import { Expand } from "@/utils";
+
 export enum AlkanesSimulationError {
   UnknownError = "UnknownError",
 }
+export type OpcodeTable = { readonly [K in string]: bigint };
 
-export type AlkanesPushExecuteResponse<K> = {
-  result: K;
+export type AlkanesPushExecuteResponse = Expand<{
+  waitForResult: () => Promise<
+    BoxedResponse<IDecodableAlkanesResponse, AlkanesExecuteError>
+  >;
   txid: string;
-};
+}>;
 
 export abstract class AlkanesBaseContract {
   constructor(
@@ -27,6 +41,7 @@ export abstract class AlkanesBaseContract {
     protected readonly alkaneId: AlkaneId,
     private readonly signPsbtFn: (unsigned: string) => Promise<string>
   ) {}
+  public abstract get OpCodes(): OpcodeTable;
 
   /*─────────────── thin helpers around Provider ───────────────*/
   protected get rpc() {
@@ -46,55 +61,11 @@ export abstract class AlkanesBaseContract {
     return this.signPsbtFn(unsigned);
   }
 
-  /*─────────────── trace-poller ───────────────*/
-  waitForTraceResult = async (
-    txid: string
-  ): Promise<BoxedResponse<Uint8Array, AlkanesTraceError>> => {
-    let traceResult: string | undefined = undefined;
-    let maxAttempts = 300;
-    while (traceResult === undefined) {
-      let traceResults = await Promise.all([
-        this.provider.trace(txid, 3),
-        this.provider.trace(txid, 4),
-      ]);
-
-      let errors = traceResults.filter(isBoxedError);
-      let success = (
-        traceResults.filter((result) => !isBoxedError(result)) as
-          | BoxedSuccess<AlkanesTraceResult>[]
-          | undefined
-      )?.[0]?.data;
-
-      let revertError = errors.find(
-        (result) => result.errorType === AlkanesTraceError.TransactionReverted
-      );
-      if (revertError) {
-        return revertError;
-      }
-
-      if (success) {
-        let returnEvent = success.find(
-          (traceEvent) => traceEvent.event === "return"
-        )!; //there is always a return event in the trace
-
-        traceResult = returnEvent?.data.response.data;
-      }
-
-      if (maxAttempts-- <= 0) {
-        return new BoxedError(
-          AlkanesTraceError.NoTraceFound,
-          "No trace found for the given txid after 300 attempts"
-        );
-      }
-
-      await sleep(2000);
-    }
-    return new BoxedSuccess(hexToUint8Array(traceResult));
-  };
-
   pushExecute = async (
     config: Parameters<Provider["execute"]>[0]
-  ): Promise<BoxedResponse<DecodableAlkanesResponse, AlkanesExecuteError>> => {
+  ): Promise<
+    BoxedResponse<AlkanesPushExecuteResponse, AlkanesExecuteError>
+  > => {
     try {
       const unsignedPsbt = consumeOrThrow(
         await this.provider.execute({
@@ -103,19 +74,34 @@ export abstract class AlkanesBaseContract {
         })
       );
 
-      const signedPsbt = await this.signPsbt(unsignedPsbt.psbt);
-
-      const tx = Psbt.fromBase64(signedPsbt, {
-        network: this.provider.network,
-      }).extractTransaction();
+      const signedTx = await this.signPsbt(unsignedPsbt.psbt);
 
       const txid = consumeOrThrow(
-        await this.provider.rpc.electrum.esplora_broadcastTx(tx.toHex())
+        await this.provider.rpc.electrum.esplora_broadcastTx(signedTx)
       );
 
-      const traceResult = consumeOrThrow(await this.waitForTraceResult(txid));
-
-      return new BoxedSuccess(new DecodableAlkanesResponse(traceResult));
+      return new BoxedSuccess({
+        waitForResult: async (): Promise<
+          BoxedResponse<IDecodableAlkanesResponse, AlkanesExecuteError>
+        > => {
+          try {
+            const traceResult = consumeOrThrow(
+              await this.provider.waitForTraceResult(txid)
+            );
+            return new BoxedSuccess(
+              new DecodableAlkanesResponse(
+                hexToUint8Array(traceResult.return.response.data)
+              )
+            );
+          } catch (err) {
+            return new BoxedError(
+              AlkanesExecuteError.UnknownError,
+              "Wait for result failed: " + (err as Error).message
+            );
+          }
+        },
+        txid,
+      });
     } catch (err) {
       return new BoxedError(
         AlkanesExecuteError.UnknownError,

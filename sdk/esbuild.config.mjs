@@ -1,4 +1,4 @@
-// esbuild.config.mjs
+// esbuild.config.mjs -----------------------------------------------------------
 import { build } from "esbuild";
 import { execSync } from "child_process";
 import fs from "node:fs";
@@ -9,14 +9,27 @@ import * as acorn from "acorn";
 import * as walk from "acorn-walk";
 import MagicString from "magic-string";
 
+/* ────────────────────────────────────────────────────────────── */
+/* 1.  Nuke the dist folder BEFORE we do anything else            */
+/* ────────────────────────────────────────────────────────────── */
+const distDir = path.resolve("dist");
+
+if (fs.existsSync(distDir)) {
+  fs.rmSync(distDir, { recursive: true, force: true });
+}
+fs.mkdirSync(distDir, { recursive: true }); // ensure it exists again
+/* ────────────────────────────────────────────────────────────── */
+
+/* 2.  Generate .d.ts (tsc) and rewrite aliases                   */
 execSync("tsc --emitDeclarationOnly --declaration --outDir dist", {
   stdio: "inherit",
 });
 execSync("tsc-alias -p tsconfig.json", { stdio: "inherit" });
 
+/* 3.  Bundle type-only entrypoints with Rollup (if any)          */
 execSync("rollup -c rollup.config.mjs", { stdio: "inherit" });
 
-const distDir = path.resolve("dist");
+/* 4.  Remove stray .d.ts files & empty sub-dirs produced above   */
 fs.readdirSync(distDir, { withFileTypes: true }).forEach((entry) => {
   const fullPath = path.join(distDir, entry.name);
   if (entry.isDirectory()) {
@@ -26,6 +39,7 @@ fs.readdirSync(distDir, { withFileTypes: true }).forEach((entry) => {
   }
 });
 
+/* 5.  ESBuild bundling with custom plugin                        */
 const removeNegZeroPlugin = {
   name: "remove-negative-zero",
   setup(build) {
@@ -49,7 +63,6 @@ const removeNegZeroPlugin = {
             node.argument.type === "Literal" &&
             node.argument.value === 0
           ) {
-            // Overwrite from start of "-" to end of "0"
             ms.overwrite(node.start, node.end, "0");
           }
         },
@@ -73,7 +86,7 @@ function pickLoader(file) {
 
 await build({
   entryPoints: ["src/index.ts"],
-  outfile: "dist/index.js",
+  outfile: path.join(distDir, "index.js"),
   bundle: true,
   platform: "node",
   target: "node18",

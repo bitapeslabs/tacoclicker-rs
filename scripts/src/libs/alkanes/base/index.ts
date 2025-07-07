@@ -1,4 +1,4 @@
-import { Provider } from "./provider";
+import { IOylProvider } from "../provider/types";
 import * as bitcoin from "bitcoinjs-lib";
 import {
   encipher,
@@ -7,27 +7,79 @@ import {
   ProtoStone,
 } from "alkanes/lib/index";
 import { ProtoruneEdict } from "alkanes/lib/protorune/protoruneedict";
-import { Account } from "./account";
-import { Signer } from "./signer";
-import { AlkaneId } from "alkanes/lib/index";
+import { IAccount } from "../account/types";
+import { Signer } from "../signer";
 import {
   findXAmountOfSats,
-  formatInputsToSign,
   getOutputValueByVOutIndex,
   getVSize,
   inscriptionSats,
   tweakSigner,
-} from "./shared/utils";
-import { getEstimatedFee } from "./psbt";
-import { OylTransactionError } from "./shared/errors";
-import { AlkanesPayload } from "./shared/types";
-import { getAddressType } from "./shared/utils";
+} from "../shared/utils";
+import { formatInputsToSign } from "../base/utils";
+import { getEstimatedFee } from "../psbt";
+import { OylTransactionError } from "../shared/errors";
+import { AlkanesPayload } from "../shared/types";
+import { getAddressType } from "../account/utils";
 import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
 import { LEAF_VERSION_TAPSCRIPT } from "bitcoinjs-lib/src/payments/bip341";
-import { actualDeployCommitFee } from "./contract";
-import { selectSpendableUtxos, type FormattedUtxo } from "./utxo";
-import { calculateTaprootTxSize } from "./shared/utils";
-import { DEFAULT_FEE_RATE } from "./shared/constants";
+import { selectSpendableUtxos } from "../utxo/utils";
+import { FormattedUtxo } from "../utxo/types";
+import { calculateTaprootTxSize } from "../shared/utils";
+import { DEFAULT_FEE_RATE } from "../shared/constants";
+import { addInputForUtxo } from "../base/utils";
+export const actualDeployCommitFee = async ({
+  payload,
+  tweakedPublicKey,
+  utxos,
+  account,
+  provider,
+  feeRate,
+}: {
+  payload: AlkanesPayload;
+  tweakedPublicKey: string;
+  utxos: FormattedUtxo[];
+  account: IAccount;
+  provider: IOylProvider;
+  feeRate?: number;
+}) => {
+  if (!feeRate) {
+    feeRate = (await provider.esplora.getFeeEstimates())["1"] as number;
+  }
+
+  const { psbt } = await createDeployCommitPsbt({
+    payload,
+    utxos,
+    tweakedPublicKey,
+    account,
+    provider,
+    feeRate,
+  });
+
+  const { fee: estimatedFee } = await getEstimatedFee({
+    feeRate,
+    psbt,
+    provider,
+  });
+
+  const { psbt: finalPsbt } = await createDeployCommitPsbt({
+    payload,
+    utxos,
+    tweakedPublicKey,
+    account,
+    provider,
+    feeRate,
+    fee: estimatedFee,
+  });
+
+  const { fee: finalFee, vsize } = await getEstimatedFee({
+    feeRate,
+    psbt: finalPsbt,
+    provider,
+  });
+
+  return { fee: finalFee, vsize };
+};
 
 export const minimumFee = ({
   taprootInputCount,
@@ -88,9 +140,9 @@ export const createExecutePsbt = async ({
   frontendFee?: bigint;
   feeAddress?: string;
   utxos: FormattedUtxo[];
-  account: Account;
+  account: IAccount;
   protostone: Buffer;
-  provider: Provider;
+  provider: IOylProvider;
   feeRate?: number;
   fee?: number;
 }) => {
@@ -193,60 +245,6 @@ export const createExecutePsbt = async ({
   }
 };
 
-export async function addInputForUtxo(
-  psbt: bitcoin.Psbt,
-  utxo: FormattedUtxo,
-  account: Account,
-  provider: Provider
-) {
-  const type = getAddressType(utxo.address);
-  switch (type) {
-    case 0: {
-      // legacy P2PKH
-      const prevHex = await provider.esplora.getTxHex(utxo.txId);
-      psbt.addInput({
-        hash: utxo.txId,
-        index: +utxo.outputIndex,
-        nonWitnessUtxo: Buffer.from(prevHex, "hex"),
-      });
-      break;
-    }
-    case 2: {
-      // nested SegWit
-      const redeem = bitcoin.script.compile([
-        bitcoin.opcodes.OP_0,
-        bitcoin.crypto.hash160(Buffer.from(account.nestedSegwit.pubkey, "hex")),
-      ]);
-      psbt.addInput({
-        hash: utxo.txId,
-        index: +utxo.outputIndex,
-        redeemScript: redeem,
-        witnessUtxo: {
-          value: utxo.satoshis,
-          script: bitcoin.script.compile([
-            bitcoin.opcodes.OP_HASH160,
-            bitcoin.crypto.hash160(redeem),
-            bitcoin.opcodes.OP_EQUAL,
-          ]),
-        },
-      });
-      break;
-    }
-    case 1: // native P2WPKH
-    case 3: // P2TR
-    default: {
-      psbt.addInput({
-        hash: utxo.txId,
-        index: +utxo.outputIndex,
-        witnessUtxo: {
-          value: utxo.satoshis,
-          script: Buffer.from(utxo.scriptPk, "hex"),
-        },
-      });
-    }
-  }
-}
-
 export const createDeployCommitPsbt = async ({
   payload,
   utxos,
@@ -259,8 +257,8 @@ export const createDeployCommitPsbt = async ({
   payload: AlkanesPayload;
   utxos: FormattedUtxo[];
   tweakedPublicKey: string;
-  account: Account;
-  provider: Provider;
+  account: IAccount;
+  provider: IOylProvider;
   feeRate?: number;
   fee?: number;
 }) => {
@@ -410,8 +408,8 @@ export const deployCommit = async ({
 }: {
   payload: AlkanesPayload;
   utxos: FormattedUtxo[];
-  account: Account;
-  provider: Provider;
+  account: IAccount;
+  provider: IOylProvider;
   feeRate?: number;
   signer: Signer;
 }) => {
@@ -476,7 +474,7 @@ export const createDeployRevealPsbt = async ({
   script: Buffer;
   feeRate: number;
   tweakedPublicKey: string;
-  provider: Provider;
+  provider: IOylProvider;
   fee?: number;
   commitTxId: string;
 }) => {
@@ -568,8 +566,8 @@ export const deployReveal = async ({
   protostone: Buffer;
   commitTxId: string;
   script: string;
-  account: Account;
-  provider: Provider;
+  account: IAccount;
+  provider: IOylProvider;
   feeRate?: number;
   signer: Signer;
 }) => {
@@ -639,7 +637,7 @@ export const actualTransactRevealFee = async ({
   commitTxId: string;
   receiverAddress: string;
   script: Buffer;
-  provider: Provider;
+  provider: IOylProvider;
   feeRate?: number;
 }) => {
   if (!feeRate) {
@@ -694,9 +692,9 @@ export const actualExecuteFee = async ({
 }: {
   alkanesUtxos?: FormattedUtxo[];
   utxos: FormattedUtxo[];
-  account: Account;
+  account: IAccount;
   protostone: Buffer;
-  provider: Provider;
+  provider: IOylProvider;
   feeRate: number;
   frontendFee?: bigint;
   feeAddress?: string;
@@ -751,9 +749,9 @@ export const executePsbt = async ({
 }: {
   alkanesUtxos?: FormattedUtxo[];
   utxos: FormattedUtxo[];
-  account: Account;
+  account: IAccount;
   protostone: Buffer;
-  provider: Provider;
+  provider: IOylProvider;
   feeRate?: number;
   frontendFee?: bigint;
   feeAddress?: string;
@@ -797,9 +795,9 @@ export const execute = async ({
 }: {
   alkanesUtxos?: FormattedUtxo[];
   utxos: FormattedUtxo[];
-  account: Account;
+  account: IAccount;
   protostone: Buffer;
-  provider: Provider;
+  provider: IOylProvider;
   feeRate?: number;
   signer: Signer;
   frontendFee?: bigint;
@@ -855,7 +853,7 @@ export const createTransactReveal = async ({
   script: Buffer;
   feeRate: number;
   tweakedPublicKey: string;
-  provider: Provider;
+  provider: IOylProvider;
   fee?: number;
   commitTxId: string;
 }) => {
@@ -934,6 +932,3 @@ export const createTransactReveal = async ({
     throw error;
   }
 };
-
-export const toTxId = (rawLeTxid: string) =>
-  Buffer.from(rawLeTxid, "hex").reverse().toString("hex");
