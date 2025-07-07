@@ -16,6 +16,7 @@ import {
   AlkanesOutpoints,
   AlkanesTraceEncodedResult,
   AlkanesTraceResult,
+  AlkaneEncodedSimulationRequest,
 } from "@/apis/alkanes/types";
 import {
   parseSimulateReturn,
@@ -23,6 +24,8 @@ import {
   extractAbiErrorMessage,
 } from "./utils";
 import { Provider } from "@/provider";
+import { AlkanesSimulationError } from "@/libs";
+import { excludeFields } from "@/utils";
 
 export enum AlkanesFetchError {
   UnknownError = "UnknownError",
@@ -165,7 +168,7 @@ export class AlkanesRpcProvider {
   }
 
   async alkanes_simulate(
-    req: Partial<AlkaneSimulateRequest>
+    req: AlkaneSimulateRequest
   ): Promise<BoxedResponse<AlkanesSimulationResult, string>> {
     const currentHeight =
       (await this.alkanes_metashrewHeight().call()) as BoxedResponse<
@@ -174,18 +177,20 @@ export class AlkanesRpcProvider {
       >;
     if (isBoxedError(currentHeight)) return currentHeight;
 
-    const merged: AlkaneSimulateRequest = {
-      alkanes: [],
-      transaction: "0x",
+    const merged: AlkaneEncodedSimulationRequest = {
+      alkanes: req.alkanes ?? [],
+      transaction: req.transaction ?? "0x",
       block: "0x",
-      height: currentHeight.data,
-      txindex: 0,
-      target: { block: "0", tx: "0" },
-      inputs: [],
-      pointer: 0,
-      refundPointer: 0,
-      vout: 0,
-      ...req,
+      height: req.height ?? currentHeight.data,
+      txindex: req.txindex ?? 0,
+      target: {
+        block: req.target?.block?.toString() ?? "0",
+        tx: req.target?.tx?.toString() ?? "0",
+      },
+      inputs: req.callData?.map((input) => input.toString()) ?? [],
+      pointer: req.pointer ?? 0,
+      refundPointer: req.refundPointer ?? 0,
+      vout: req.vout ?? 0,
     };
 
     const res = await this.rpc<AlkanesRawSimulationResponse>(
@@ -194,11 +199,16 @@ export class AlkanesRpcProvider {
     ).call();
 
     if (isBoxedError(res)) return res;
+    if (res.data.execution.error) {
+      return new BoxedError(
+        AlkanesSimulationError.UnknownError,
+        res.data.execution.error
+      );
+    }
 
     return new BoxedSuccess({
       raw: res.data,
-      parsed: parseSimulateReturn(res.data.result.execution.data),
-      error: res.data.result.execution.error,
+      parsed: parseSimulateReturn(res.data.execution.data),
     });
   }
 }

@@ -6,6 +6,7 @@ import {
 } from "@/apis/sandshrew/shared";
 
 import { execute, simulate } from "@/libs/alkanes";
+import { retryOnBoxedError } from "@/boxed";
 
 import { AlkanesRpcProvider, BaseRpcProvider } from "./apis";
 
@@ -26,6 +27,8 @@ export class Provider {
   readonly btcTicker: string;
   readonly rpc: BaseRpcProvider;
   readonly defaultFeeRate: number;
+  private readonly TIMEOUT_MS = 60_000 * 5; // 5 minutes
+  private readonly INTERVAL_MS = 5_000; // 5 seconds
 
   constructor(config: ProviderConfig) {
     this.sandshrewUrl = config.sandshrewUrl;
@@ -52,12 +55,18 @@ export class Provider {
   execute(
     config: Omit<Parameters<typeof execute>[0], "provider">
   ): ReturnType<typeof execute> {
-    return execute({ provider: this, ...config });
+    return retryOnBoxedError({
+      intervalMs: this.INTERVAL_MS,
+      timeoutMs: this.TIMEOUT_MS,
+    })(() => execute({ provider: this, ...config }));
   }
   simulate(
     request: Parameters<typeof simulate>[1]
   ): ReturnType<typeof simulate> {
-    return simulate(this, request);
+    return retryOnBoxedError({
+      intervalMs: this.INTERVAL_MS,
+      timeoutMs: this.TIMEOUT_MS,
+    })(() => simulate(this, request));
   }
 
   trace(
@@ -65,6 +74,9 @@ export class Provider {
   ): ReturnType<
     ReturnType<typeof AlkanesRpcProvider.prototype.alkanes_trace>["call"]
   > {
-    return this.rpc.alkanes.alkanes_trace(...args).call();
+    return retryOnBoxedError({
+      intervalMs: this.INTERVAL_MS,
+      timeoutMs: this.TIMEOUT_MS,
+    })(() => this.rpc.alkanes.alkanes_trace(...args).call());
   }
 }

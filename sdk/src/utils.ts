@@ -9,3 +9,15 @@ export function hexToUint8Array(hex: string): Uint8Array {
   }
   return bytes;
 }
+export function excludeFields<K, T extends object>(
+  obj: T,
+  fields: (keyof T)[]
+): K {
+  const filtered: Partial<T> = {};
+  for (const key in obj) {
+    if (!fields.includes(key)) {
+      filtered[key] = obj[key];
+    }
+  }
+  return filtered as K;
+}

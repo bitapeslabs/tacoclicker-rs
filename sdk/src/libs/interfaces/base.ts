@@ -11,6 +11,7 @@ import { Psbt } from "bitcoinjs-lib";
 import { AlkanesTraceError } from "@/apis";
 import { hexToUint8Array, sleep } from "@/utils";
 import { AlkanesExecuteError } from "../alkanes";
+import { DecodableAlkanesResponse } from "../decoders";
 export enum AlkanesSimulationError {
   UnknownError = "UnknownError",
 }
@@ -91,12 +92,9 @@ export abstract class AlkanesBaseContract {
     return new BoxedSuccess(hexToUint8Array(traceResult));
   };
 
-  pushExecute = async <K = Uint8Array>(
-    config: Parameters<Provider["execute"]>[0],
-    decodeFn?: (data: Uint8Array) => K
-  ): Promise<
-    BoxedResponse<AlkanesPushExecuteResponse<K>, AlkanesExecuteError>
-  > => {
+  pushExecute = async (
+    config: Parameters<Provider["execute"]>[0]
+  ): Promise<BoxedResponse<DecodableAlkanesResponse, AlkanesExecuteError>> => {
     try {
       const unsignedPsbt = consumeOrThrow(
         await this.provider.execute({
@@ -117,12 +115,7 @@ export abstract class AlkanesBaseContract {
 
       const traceResult = consumeOrThrow(await this.waitForTraceResult(txid));
 
-      return new BoxedSuccess({
-        result: decodeFn
-          ? decodeFn(traceResult)
-          : (traceResult as unknown as K),
-        txid,
-      });
+      return new BoxedSuccess(new DecodableAlkanesResponse(traceResult));
     } catch (err) {
       return new BoxedError(
         AlkanesExecuteError.UnknownError,

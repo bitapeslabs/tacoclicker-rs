@@ -1,11 +1,5 @@
 import * as bitcoin from "bitcoinjs-lib";
-import {
-  addInputDynamic,
-  bigintReviver,
-  getEstimatedFee,
-  simulateRequestSchema,
-  stringifyBigInts,
-} from "./utils";
+import { addInputDynamic, getEstimatedFee } from "./utils";
 
 import { FormattedUtxo } from "@/apis/sandshrew";
 import { encodeRunestoneProtostone, encipher, ProtoStone } from "alkanes";
@@ -29,18 +23,8 @@ export interface AlkanesExecuteResponse {
   vsize: number;
 }
 
-export const simulate = (
-  provider: Provider,
-  params: Partial<AlkaneSimulateRequest>
-) => {
-  const parsedInput = JSON.parse(JSON.stringify(params), bigintReviver); // "123n" → 123n
-  const request = simulateRequestSchema.parse(parsedInput);
-
-  const rpcReadyRequest = stringifyBigInts(
-    request
-  ) as Partial<AlkaneSimulateRequest>;
-
-  return provider.rpc.alkanes.alkanes_simulate(rpcReadyRequest);
+export const simulate = (provider: Provider, params: AlkaneSimulateRequest) => {
+  return provider.rpc.alkanes.alkanes_simulate(params);
 };
 
 export const execute = async ({

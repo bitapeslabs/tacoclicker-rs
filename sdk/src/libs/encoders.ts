@@ -1,4 +1,6 @@
-export function encodeStringToU128Array(str: string): bigint[] {
+import { BoxedResponse, BoxedSuccess, BoxedError } from "@/boxed";
+
+function encodeStringToU128Array(str: string): bigint[] {
   const encoder = new TextEncoder();
   const data = encoder.encode(str);
 
@@ -22,4 +24,68 @@ export function encodeStringToU128Array(str: string): bigint[] {
   }
 
   return u128s;
+}
+
+enum EncodeError {
+  InvalidPayload = "Invalid payload type",
+}
+
+export class Encodable {
+  public readonly payload: unknown;
+
+  constructor(payload: unknown) {
+    this.payload = payload;
+  }
+
+  fromString(): BoxedResponse<bigint[], EncodeError> {
+    if (typeof this.payload !== "string") {
+      return new BoxedError(
+        EncodeError.InvalidPayload,
+        "Payload must be a string"
+      );
+    }
+    return new BoxedSuccess(encodeStringToU128Array(this.payload));
+  }
+
+  fromName(): BoxedResponse<bigint[], EncodeError> {
+    if (typeof this.payload !== "string") {
+      return new BoxedError(
+        EncodeError.InvalidPayload,
+        "Payload must be a string"
+      );
+    }
+    let result = encodeStringToU128Array(this.payload);
+
+    if (result.length > 2) {
+      return new BoxedError(
+        EncodeError.InvalidPayload,
+        "Payload must be a name (max 2 u128s)"
+      );
+    }
+
+    if (result.length === 1) {
+      result.push(0n); // pad with zero if only one u128
+    }
+    return new BoxedSuccess(result);
+  }
+
+  fromChar(): BoxedResponse<bigint[], EncodeError> {
+    if (typeof this.payload !== "string") {
+      return new BoxedError(
+        EncodeError.InvalidPayload,
+        "Payload must be a string"
+      );
+    }
+
+    let result = encodeStringToU128Array(this.payload);
+
+    if (result.length > 1) {
+      return new BoxedError(
+        EncodeError.InvalidPayload,
+        "Payload must be a single character (max 1 u128)"
+      );
+    }
+
+    return new BoxedSuccess(result);
+  }
 }

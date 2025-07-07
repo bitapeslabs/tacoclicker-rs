@@ -187,13 +187,13 @@ export const getTaprootWalletSigner = (): DecryptedWallet => {
 type BrowserLikeWalletSigner = {
   oyl: Account;
   signer: WalletSigner;
-  signPsbt: (unsignedPsbtBase64: string) => string;
+  signPsbt: (unsignedPsbtBase64: string) => Promise<string>;
 };
 
-export function signPsbt(
+export async function signPsbt(
   base64Psbt: string,
   walletSigner: WalletSigner
-): string {
+): Promise<string> {
   console.log("Signing PSBT for seller input...");
   // Validate the input PSBT
   const psbt = bitcoin.Psbt.fromBase64(base64Psbt, {

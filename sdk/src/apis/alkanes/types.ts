@@ -93,6 +93,18 @@ export type AlkanesByAddressRuneBalance = {
   balance: string; // hex string representing amount, e.g. "0x886c98b76000"
 };
 export interface AlkaneSimulateRequest {
+  alkanes?: any[];
+  transaction?: string;
+  height?: string;
+  txindex?: number;
+  target: AlkaneId;
+  callData: bigint[];
+  pointer?: number;
+  refundPointer?: number;
+  vout?: number;
+}
+
+export type AlkaneEncodedSimulationRequest = {
   alkanes: any[];
   transaction: string;
   block: string;
@@ -103,7 +115,7 @@ export interface AlkaneSimulateRequest {
   pointer: number;
   refundPointer: number;
   vout: number;
-}
+};
 export interface AlkaneToken {
   name: string;
   symbol: string;
@@ -123,23 +135,20 @@ export interface AlkanesParsedSimulationResult {
 }
 
 export interface AlkanesRawSimulationResponse {
-  result: {
-    status: number;
-    gasUsed: number;
-    execution: {
-      alkanes: unknown[];
-      storage: unknown[];
-      data: string;
-      error?: string;
-    };
-    parsed: unknown;
+  status: number;
+  gasUsed: number;
+  execution: {
+    alkanes: unknown[];
+    storage: unknown[];
+    data: string;
+    error?: string;
   };
+  parsed: unknown;
 }
 
 export type AlkanesSimulationResult = {
   raw: AlkanesRawSimulationResponse;
   parsed: AlkanesParsedSimulationResult | undefined;
-  error?: string;
 };
 
 export interface AlkanesTraceEncodedCreateEvent {
