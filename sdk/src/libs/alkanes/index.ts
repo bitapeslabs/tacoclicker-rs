@@ -20,6 +20,7 @@ import { Provider } from "@/provider";
 
 export enum AlkanesExecuteError {
   UnknownError = "UnknownError",
+  InvalidParams = "InvalidParams",
 }
 
 export interface AlkanesExecuteResponse {
