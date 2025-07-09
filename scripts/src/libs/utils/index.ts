@@ -109,3 +109,5 @@ export const deployContract = async (
     throw err;
   }
 };
+
+export * from "./logger";

@@ -27,5 +27,4 @@ process.removeAllListeners("warning");
 process.on("warning", (w) => {
   if (w.name !== "DeprecationWarning") process.emit("warning", w);
 });
-
 main();

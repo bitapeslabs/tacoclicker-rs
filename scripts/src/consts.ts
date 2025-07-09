@@ -2,7 +2,7 @@ import * as bitcoin from "bitcoinjs-lib";
 import * as tacoclickerLib from "tacoclicker-sdk";
 import * as alkanesLib from "@/libs/alkanes";
 import { walletData, NETWORK } from "./env"; // ← new
-import { TaskLogger } from "@/logger";
+import { TaskLogger } from "@/libs/utils/logger";
 import { ecc } from "./crypto/ecc";
 bitcoin.initEccLib(ecc);
 

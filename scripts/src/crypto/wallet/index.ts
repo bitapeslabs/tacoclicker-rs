@@ -163,6 +163,7 @@ type BrowserLikeWalletSigner = {
   oyl: IAccount;
   signer: WalletSigner;
   signPsbt: (unsignedPsbtBase64: string) => Promise<string>;
+  address: string;
 };
 
 export async function signPsbt(
@@ -196,6 +197,7 @@ export const walletSigner: BrowserLikeWalletSigner = {
   signer: taprootDecryptedWallet.signer,
   signPsbt: (unsignedPsbtBase64: string) =>
     signPsbt(unsignedPsbtBase64, taprootDecryptedWallet.signer),
+  address: getCurrentTaprootAddress(taprootDecryptedWallet.signer),
 };
 
 export function decryptWalletWithPassword(

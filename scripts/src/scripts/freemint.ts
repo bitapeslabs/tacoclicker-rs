@@ -2,8 +2,7 @@ import path from "path";
 import { deployContract } from "@/libs/utils";
 import { AlkaneId, BaseTokenContract } from "tacoclicker-sdk";
 import { provider } from "@/consts";
-import { getCurrentTaprootAddress, walletSigner } from "@/crypto/wallet";
-import { consumeOrThrow } from "@/boxed";
+import { walletSigner } from "@/crypto/wallet";
 import { taskLogger as logger } from "@/consts";
 import { consumeAll } from "@/boxed";
 
@@ -15,25 +14,21 @@ export const runDeployAndInspectFreeMint = async (): Promise<boolean> => {
   const root = logger.start("deploy & inspect free-mint token");
 
   try {
-    /* ── deploy contract ─────────────────────────────────────── */
     const freeMintId = await deployContract(
       path.join(__dirname, "..", "..", "..", "free-mint"),
       [100n] // view-method quirk
     );
     logger.success(`contract at ${readableAlkaneId(freeMintId)}`);
 
-    /* ── wrap SDK object ─────────────────────────────────────── */
     const tokenContract = new BaseTokenContract(
       provider,
       freeMintId,
       walletSigner.signPsbt
     );
-    const address = await getCurrentTaprootAddress(walletSigner.signer);
 
-    /* ── initialise ──────────────────────────────────────────── */
-    const initSpin = logger.progress("submitting initialise tx…");
-    const initRes = consumeOrThrow(
-      await tokenContract.initialize(address, {
+    await logger.progressExecute(
+      "initialize",
+      tokenContract.initialize(walletSigner.address, {
         name: "Free Mint Token",
         symbol: "FMT",
         valuePerMint: 10n,
@@ -41,23 +36,15 @@ export const runDeployAndInspectFreeMint = async (): Promise<boolean> => {
         premine: 10_000n,
       })
     );
-    initSpin.succeed(`txid ${initRes.txid}`);
 
-    const initWait = logger.progress("waiting for initialise trace…");
-    await initRes.waitForResult();
-    initWait.succeed("initialised");
+    await logger.progressExecute(
+      "mint",
+      tokenContract.mintTokens(walletSigner.address)
+    );
 
-    /* ── first mint ──────────────────────────────────────────── */
-    const mintSpin = logger.progress("submitting mint tx…");
-    const mintRes = consumeOrThrow(await tokenContract.mintTokens(address));
-    mintSpin.succeed(`txid ${mintRes.txid}`);
-
-    const mintWait = logger.progress("waiting for mint trace…");
-    await mintRes.waitForResult();
-    mintWait.succeed("mint successful");
-
-    await logger.withTask("read contract state", async () => {
-      const [name, symbol, totalSupply, valuePerMint, minted, cap] = consumeAll(
+    let tokenContractReturnValues = await logger.progressAbstract(
+      "read contract state",
+      consumeAll(
         await Promise.all([
           tokenContract.viewGetName(),
           tokenContract.viewGetSymbol(),
@@ -66,16 +53,29 @@ export const runDeployAndInspectFreeMint = async (): Promise<boolean> => {
           tokenContract.viewGetMinted(),
           tokenContract.viewGetCap(),
         ] as const)
-      );
+      )
+    );
 
-      logger.info(`name:          ${name}`);
-      logger.info(`symbol:        ${symbol}`);
-      logger.info(`totalSupply:   ${totalSupply}`);
-      logger.info(`valuePerMint:  ${valuePerMint}`);
-      logger.info(`minted:        ${minted}`);
-      logger.info(`cap:           ${cap}`);
-      logger.success("contract state fetched");
-    });
+    logger.info("Asserting contract state...");
+    logger.deepAssert(tokenContractReturnValues, [
+      "Free Mint Token",
+      "FMT",
+      10_010, // totalSupply + minted
+      10, // valuePerMint
+      1, // minted
+      1000, // cap
+    ]);
+    logger.success("All asserts passed. Contract state asserted successfully.");
+
+    const [name, symbol, totalSupply, valuePerMint, minted, cap] =
+      tokenContractReturnValues;
+
+    logger.info(`name:          ${name}`);
+    logger.info(`symbol:        ${symbol}`);
+    logger.info(`totalSupply:   ${totalSupply}`);
+    logger.info(`valuePerMint:  ${valuePerMint}`);
+    logger.info(`minted:        ${minted}`);
+    logger.info(`cap:           ${cap}`);
     root.close();
     return true;
   } catch (err) {
