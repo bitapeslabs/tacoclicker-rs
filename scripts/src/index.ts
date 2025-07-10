@@ -1,7 +1,9 @@
 // simulateFreeMint.ts
 import { commands } from "./scripts";
-import { taskLogger as logger } from "@/consts";
-import { consumeAll } from "./boxed";
+import { taskLogger as logger, provider } from "@/consts";
+import { consumeAll, consumeOrThrow } from "./boxed";
+import { serialize, field } from "@dao-xyz/borsh";
+import { Encodable } from "tacoclicker-sdk";
 
 const main = async () => {
   const command =
@@ -23,8 +25,18 @@ const main = async () => {
   commandFn();
 };
 
+class TestStruct {
+  @field({ type: "string" })
+  public a: string | undefined;
+
+  constructor(data: { a?: string }) {
+    this.a = data.a;
+  }
+}
+
 process.removeAllListeners("warning");
 process.on("warning", (w) => {
   if (w.name !== "DeprecationWarning") process.emit("warning", w);
 });
+
 main();

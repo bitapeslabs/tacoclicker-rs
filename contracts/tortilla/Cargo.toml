@@ -1,8 +1,8 @@
 [package]
-name = "tortilla"
+name = "sandbox"
 version = "0.1.0"
 edition = "2021"
-description = "tortilla-rs"
+description = "sandboxing smart contract to test alkane methods"
 authors = ["Bitapes Labs"]
 
 [lib]

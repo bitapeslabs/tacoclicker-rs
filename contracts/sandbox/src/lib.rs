@@ -11,9 +11,10 @@ use alkanes_runtime::{declare_alkane, message::MessageDispatch, runtime::AlkaneR
 use alkanes_support::response::CallResponse;
 use anyhow::{anyhow, Result};
 
-use borsh::{from_slice, to_vec};
+use borsh::{to_vec, BorshDeserialize};
 use metashrew_support::compat::to_arraybuffer_layout;
 use schemas::{BorshWordCountRequest, BorshWordCountResponse};
+use std::io::Cursor;
 
 use token::MintableToken;
 
@@ -101,19 +102,11 @@ impl Taqueria {
         let mut response = CallResponse::forward(&context.incoming_alkanes);
         let inputs = self.context()?.inputs;
 
-        let request = from_slice::<BorshWordCountRequest>(&get_byte_array_from_inputs(&inputs))
-            .map_err(|_| anyhow!("TAQUERIA: Invalid request passed in"))?;
+        let mut bytes_reader = Cursor::new(get_byte_array_from_inputs(&inputs));
+        let request = BorshWordCountRequest::deserialize_reader(&mut bytes_reader)
+            .map_err(|_| anyhow!("TAQUERIA: invalid request"))?;
 
-        let word_count: u16 = request
-            .data
-            .chars()
-            .fold(0, |mut sum, x| {
-                if x == ' ' {
-                    sum += 1;
-                }
-                sum
-            })
-            .try_into()
+        let word_count: u16 = u16::try_from(request.data.split_whitespace().count())
             .map_err(|_| anyhow!("TAQUERIA: Word overflow"))?;
 
         let borsh_response = to_vec(&BorshWordCountResponse {

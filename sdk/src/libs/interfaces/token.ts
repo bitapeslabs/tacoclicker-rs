@@ -185,7 +185,6 @@ export class BaseTokenContract extends AlkanesBaseContract {
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
-          target: this.alkaneId,
         })
       );
 
@@ -208,7 +207,6 @@ export class BaseTokenContract extends AlkanesBaseContract {
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
-          target: this.alkaneId,
         })
       );
 
@@ -231,7 +229,6 @@ export class BaseTokenContract extends AlkanesBaseContract {
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
-          target: this.alkaneId,
         })
       );
 
@@ -254,7 +251,6 @@ export class BaseTokenContract extends AlkanesBaseContract {
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
-          target: this.alkaneId,
         })
       );
 
@@ -276,7 +272,6 @@ export class BaseTokenContract extends AlkanesBaseContract {
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
-          target: this.alkaneId,
         })
       );
 
@@ -299,7 +294,6 @@ export class BaseTokenContract extends AlkanesBaseContract {
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
-          target: this.alkaneId,
         })
       );
 
@@ -324,7 +318,6 @@ export class BaseTokenContract extends AlkanesBaseContract {
       let simulationResult = consumeOrThrow(
         await this.simulate({
           callData,
-          target: this.alkaneId,
         })
       );
 

@@ -25,6 +25,7 @@ import { Expand } from "@/utils";
 
 export enum AlkanesSimulationError {
   UnknownError = "UnknownError",
+  TransactionReverted = "Revert",
 }
 export type OpcodeTable = { readonly [K in string]: bigint };
 
@@ -50,9 +51,7 @@ export abstract class AlkanesBaseContract {
   protected get execute() {
     return this.provider.execute.bind(this.provider);
   }
-  protected get simulate() {
-    return this.provider.simulate.bind(this.provider);
-  }
+
   protected get trace() {
     return this.provider.trace.bind(this.provider);
   }
@@ -61,6 +60,11 @@ export abstract class AlkanesBaseContract {
     return this.signPsbtFn(unsigned);
   }
 
+  simulate(
+    request: Omit<Parameters<Provider["simulate"]>[0], "target">
+  ): ReturnType<Provider["simulate"]> {
+    return this.provider.simulate({ target: this.alkaneId, ...request });
+  }
   pushExecute = async (
     config: Parameters<Provider["execute"]>[0]
   ): Promise<

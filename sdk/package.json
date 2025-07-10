@@ -19,6 +19,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@dao-xyz/borsh": "^5.2.3",
     "@dotenv-run/esbuild": "^1.5.0",
     "@magiceden-oss/runestone-lib": "^1.0.2",
     "@noble/secp256k1": "1.6.3",

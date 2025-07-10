@@ -1,14 +1,20 @@
 import { AlkanesSimulationResult } from "@/apis";
 import { hexToUint8Array } from "@/utils";
 import { Expand } from "@/utils";
-export class DecodableAlkanesResponse {
+import { deserialize, Constructor, AbstractType } from "@dao-xyz/borsh";
+export class DecodableAlkanesResponse<T> {
   public readonly bytes: Uint8Array;
+  public readonly borshSchema?: Constructor<T> | AbstractType<T>;
 
-  constructor(payload: Uint8Array | AlkanesSimulationResult) {
+  constructor(
+    payload: Uint8Array | AlkanesSimulationResult,
+    borshSchema?: Constructor<T> | AbstractType<T>
+  ) {
+    this.borshSchema = borshSchema;
     if (payload instanceof Uint8Array) {
       this.bytes = payload;
-    } else if (payload?.parsed?.bytes) {
-      this.bytes = hexToUint8Array(payload.parsed.bytes);
+    } else if (payload.raw.execution.data) {
+      this.bytes = hexToUint8Array(payload.raw.execution.data);
     } else {
       throw new Error("Invalid payload type for Decodable");
     }
@@ -67,8 +73,20 @@ export class DecodableAlkanesResponse {
   toUint8Array(): Uint8Array {
     return this.bytes;
   }
-}
 
+  toHex(): string {
+    return Array.from(this.bytes)
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  toObject(): T {
+    if (!this.borshSchema) {
+      throw new Error("Borsh deserialization function not provided");
+    }
+    return deserialize(this.bytes, this.borshSchema);
+  }
+}
 export type IDecodableAlkanesResponse = Expand<
   (typeof DecodableAlkanesResponse)["prototype"]
 >;

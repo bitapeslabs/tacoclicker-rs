@@ -1,5 +1,6 @@
 import { BoxedResponse, BoxedSuccess, BoxedError } from "@/boxed";
 import { Expand } from "@/utils";
+import { AbstractType, Constructor, serialize } from "@dao-xyz/borsh";
 function encodeStringToU128Array(str: string): bigint[] {
   const encoder = new TextEncoder();
   const data = encoder.encode(str);
@@ -26,15 +27,40 @@ function encodeStringToU128Array(str: string): bigint[] {
   return u128s;
 }
 
+function encodeUintArrayToU128Array(data: Uint8Array | number[]): bigint[] {
+  const bytes = data instanceof Uint8Array ? data : Uint8Array.from(data);
+
+  const u128s: bigint[] = [];
+
+  for (let offset = 0; offset < bytes.length; offset += 16) {
+    const chunk = bytes.subarray(offset, offset + 16);
+
+    // Zero-pad to a full 16-byte buffer
+    const buf = new Uint8Array(16);
+    buf.set(chunk);
+
+    let word = 0n;
+    for (let i = 0; i < 16; i++) {
+      word |= BigInt(buf[i]) << (8n * BigInt(i));
+    }
+
+    u128s.push(word);
+  }
+
+  return u128s;
+}
+
 enum EncodeError {
   InvalidPayload = "Invalid payload type",
 }
 
-export class Encodable {
+export class Encodable<T> {
   public readonly payload: unknown;
+  public readonly borshSchema?: Constructor<T>;
 
-  constructor(payload: unknown) {
+  constructor(payload: unknown, borshSchema?: Constructor<T>) {
     this.payload = payload;
+    this.borshSchema = borshSchema;
   }
 
   fromString(): BoxedResponse<bigint[], EncodeError> {
@@ -87,6 +113,19 @@ export class Encodable {
     }
 
     return new BoxedSuccess(result);
+  }
+
+  fromObject(): BoxedResponse<bigint[], EncodeError> {
+    if (!this.borshSchema) {
+      return new BoxedError(
+        EncodeError.InvalidPayload,
+        "Borsh schema is required for object serialization"
+      );
+    }
+
+    return new BoxedSuccess(
+      encodeUintArrayToU128Array(serialize(new this.borshSchema(this.payload)))
+    );
   }
 }
 

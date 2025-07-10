@@ -153,7 +153,10 @@ export class AlkanesRpcProvider {
   alkanes_getAlkaneById(id: AlkaneId) {
     return this.rpc("alkanes_meta", [
       {
-        target: id,
+        target: {
+          block: id.block.toString(),
+          tx: id.tx.toString(),
+        },
         alkanes: [],
         transaction: "0x",
         block: "0x",
@@ -201,7 +204,7 @@ export class AlkanesRpcProvider {
     if (isBoxedError(res)) return res;
     if (res.data.execution.error) {
       return new BoxedError(
-        AlkanesSimulationError.UnknownError,
+        AlkanesSimulationError.TransactionReverted,
         res.data.execution.error
       );
     }

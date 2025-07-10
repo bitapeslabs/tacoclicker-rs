@@ -13,13 +13,11 @@ pub fn u128_to_string(v: u128) -> String {
 }
 
 //Does not consume inputs so context retains control
-pub fn get_byte_array_from_inputs(inputs: &Vec<u128>) -> Vec<u8> {
-    let mut mutable_inputs = inputs.clone();
-
-    mutable_inputs.remove(0);
-
-    mutable_inputs
+pub fn get_byte_array_from_inputs(inputs: &[u128]) -> Vec<u8> {
+    // skip(1) leaves the original Vec untouched and avoids an O(n) remove
+    inputs
         .iter()
-        .flat_map(|&num| num.to_le_bytes()) // or .to_be_bytes() for big-endian
+        .skip(1)
+        .flat_map(|num| num.to_le_bytes()) // still LE
         .collect()
 }

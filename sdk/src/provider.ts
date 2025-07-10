@@ -26,6 +26,7 @@ import {
 } from "./apis";
 
 import { sleep } from "@/utils";
+import { AlkanesSimulationError } from "./libs";
 
 export interface ProviderConfig {
   sandshrewUrl: string;
@@ -87,9 +88,9 @@ export class Provider {
       timeoutMs: this.TIMEOUT_MS,
     })(
       () => execute({ provider: this, ...config }),
-      (attempt) => {
+      (attempt, res) => {
         console.warn(
-          `EXECUTE: Attempt ${attempt + 1}: Failed to execute request. Retrying...`
+          `EXECUTE: Attempt ${attempt + 1}: Failed to execute request (response: ${res.errorType + ": " + res.message}). Retrying...`
         );
       }
     );
@@ -102,11 +103,12 @@ export class Provider {
       timeoutMs: this.TIMEOUT_MS,
     })(
       () => simulate(this, request),
-      (attempt) => {
+      (attempt, res) => {
         console.warn(
-          `SIMULATE: Attempt ${attempt + 1}: Failed to simulate request. Retrying...`
+          `SIMULATE: Attempt ${attempt + 1}: Failed to simulate request (response: ${res.errorType + ": " + res.message}). Retrying...`
         );
-      }
+      },
+      [AlkanesSimulationError.TransactionReverted]
     );
   }
 
@@ -120,9 +122,9 @@ export class Provider {
       timeoutMs: this.TIMEOUT_MS,
     })(
       () => this.rpc.alkanes.alkanes_trace(...args).call(),
-      (attempt) => {
+      (attempt, res) => {
         console.warn(
-          `TRACE: Attempt ${attempt + 1}: Failed to fetch trace for txid: ${args[0]}. Retrying...`
+          `TRACE: Attempt ${attempt + 1}: Failed to fetch trace for txid: ${args[0]} (response: ${res.errorType + ": " + res.message}). Retrying...`
         );
       },
       [AlkanesTraceError.TransactionReverted, AlkanesTraceError.NoTraceFound]

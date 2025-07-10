@@ -10,12 +10,12 @@ const readableAlkaneId = (id: AlkaneId) =>
   `(block→${Number(id.block)}n : tx→${Number(id.tx)}n)`;
 
 /** Deploy, initialise and mint a Free-Mint token contract. */
-export const runDeployAndInspectFreeMint = async (): Promise<boolean> => {
+export const runFreeMint = async (): Promise<boolean> => {
   const root = logger.start("deploy & inspect free-mint token");
 
   try {
     const freeMintId = await deployContract(
-      path.join(__dirname, "..", "..", "..", "free-mint"),
+      path.join(__dirname, "../..", "./contracts/free-mint"),
       [100n] // view-method quirk
     );
     logger.success(`contract at ${readableAlkaneId(freeMintId)}`);
