@@ -2,6 +2,15 @@ import { AlkanesSimulationResult } from "@/apis";
 import { hexToUint8Array } from "@/utils";
 import { Expand } from "@/utils";
 import { deserialize, Constructor, AbstractType } from "@dao-xyz/borsh";
+
+export function removeTrailingNullBytes(input: Uint8Array): Uint8Array {
+  let end = input.length;
+  while (end > 0 && input[end - 1] === 0) {
+    end--;
+  }
+  return input.slice(0, end);
+}
+
 export class DecodableAlkanesResponse<T> {
   public readonly bytes: Uint8Array;
   public readonly borshSchema?: Constructor<T> | AbstractType<T>;

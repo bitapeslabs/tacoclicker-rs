@@ -3,6 +3,7 @@
 //! Created by mork1e
 
 pub mod consts;
+pub mod schemas;
 pub mod token;
 pub mod utils;
 
@@ -12,37 +13,65 @@ use alkanes_support::response::CallResponse;
 use anyhow::{anyhow, ensure, Result};
 use bitcoin::Transaction;
 
+use borsh::{BorshDeserialize, BorshSerialize};
+use consts::{FUNDING_ADDRESS, FUNDING_PRICE_SATS};
 use metashrew_support::compat::to_arraybuffer_layout;
 use metashrew_support::index_pointer::KeyValuePointer;
-
-use consts::{FUNDING_ADDRESS, FUNDING_PRICE_SATS};
 use metashrew_support::utils::consensus_decode;
+use std::io::Cursor;
+use std::sync::Arc;
 use token::MintableToken;
-use utils::address_from_txout;
+
+use crate::schemas::SchemaTortillaConsts;
+use crate::utils::get_byte_array_from_inputs;
 
 #[derive(Default)]
 pub struct Tortilla(());
 
 impl MintableToken for Tortilla {}
 
+//STORAGE TORTILLA
+impl Tortilla {
+    fn get_consts_pointer(&self) -> StoragePointer {
+        StoragePointer::from_keyword("/consts")
+    }
+
+    fn get_consts_value(&self) -> Result<SchemaTortillaConsts> {
+        let bytes = (*self.get_consts_pointer().get()).clone();
+        let mut bytes_reader = Cursor::new(&bytes);
+
+        SchemaTortillaConsts::deserialize_reader(&mut bytes_reader)
+            .map_err(|_| anyhow!("TORTILLA: Failed to deserialize consts"))
+    }
+
+    fn get_caller_registration_pointer(&self, vout: usize) -> Result<StoragePointer> {
+        let caller_vout_id = self.get_caller_id_at_vout(vout)?;
+        Ok(StoragePointer::from_keyword("/registrations").select(&caller_vout_id))
+    }
+
+    fn get_caller_id_at_vout(&self, vout: usize) -> Result<Vec<u8>> {
+        let tx = self.get_serialized_transaction()?;
+
+        match tx.output.get(vout) {
+            Some(output) => Ok(output.script_pubkey.as_bytes().to_vec()),
+            None => Err(anyhow!("TORTILLA: invalid script pub key at vout")),
+        }
+    }
+
+    fn get_is_registered_value(&self, vout: usize) -> Result<Vec<u8>> {
+        let registration_pointer = self.get_caller_registration_pointer(vout)?;
+
+        Ok(registration_pointer.get().to_vec())
+    }
+}
+
 #[derive(MessageDispatch)]
 enum TortillaMessage {
     #[opcode(0)]
-    Initialize {
-        /// Initial token units
-        token_units: u128,
-    },
+    Initialize,
 
     #[opcode(77)]
     MintTokens,
-
-    //80-98 are reserved for tortilla specific opcodes
-    #[opcode(78)]
-    Register { vout: u128 }, //Check that theres a vout paying FUNDING_ADDRESS 21,000 sats and register user
-
-    #[opcode(79)]
-    #[returns(bool)]
-    GetIsRegistered { vout: u128 },
 
     #[opcode(99)]
     #[returns(String)]
@@ -68,6 +97,11 @@ enum TortillaMessage {
     #[returns(u128)]
     GetValuePerMint,
 
+    //TORTILLA OPCODES START HERE
+    #[opcode(105)]
+    #[returns(Vec<u8>)]
+    GetConsts,
+
     #[opcode(1000)]
     #[returns(Vec<u8>)]
     GetData,
@@ -75,25 +109,6 @@ enum TortillaMessage {
 
 impl Tortilla {
     //=====  STORAGE POINTER DEFS =====
-    fn get_caller_registration_pointer(&self, vout: usize) -> Result<StoragePointer> {
-        let caller_vout_id = self.get_caller_id_at_vout(vout)?;
-        Ok(StoragePointer::from_keyword("/registrations").select(&caller_vout_id))
-    }
-
-    fn get_caller_id_at_vout(&self, vout: usize) -> Result<Vec<u8>> {
-        let tx = self.get_serialized_transaction()?;
-
-        match tx.output.get(vout) {
-            Some(output) => Ok(output.script_pubkey.as_bytes().to_vec()),
-            None => Err(anyhow!("TORTILLA: invalid script pub key at vout")),
-        }
-    }
-
-    fn get_is_registered_value(&self, vout: usize) -> Result<Vec<u8>> {
-        let registration_pointer = self.get_caller_registration_pointer(vout)?;
-
-        Ok(registration_pointer.get().to_vec())
-    }
 
     //==================================
 
@@ -105,22 +120,34 @@ impl Tortilla {
     }
     //==================================
 
-    fn initialize(&self, token_units: u128) -> Result<CallResponse> {
-        let context = self.context()?;
-        let mut response = CallResponse::forward(&context.incoming_alkanes);
-
+    fn initialize(&self) -> Result<CallResponse> {
         // Prevent multiple initializations
         self.observe_initialization()
             .map_err(|_| anyhow!("Contract already initialized"))?;
 
-        // Mint initial tokens
-        if token_units > 0 {
-            response.alkanes.0.push(self.mint(&context, token_units)?);
-        }
+        let context = self.context()?;
+        let response = CallResponse::forward(&context.incoming_alkanes);
+
+        let mut byte_reader = Cursor::new(get_byte_array_from_inputs(&context.inputs));
+        let consts = SchemaTortillaConsts::deserialize_reader(&mut byte_reader)
+            .map_err(|_| anyhow!("TORTILLA: Failed to decode initialization parameters"))?;
+
+        let consumed_bytes = borsh::to_vec(&consts)?;
+        self.get_consts_pointer().set(Arc::new(consumed_bytes));
 
         Ok(response)
     }
 
+    fn get_consts(&self) -> Result<CallResponse> {
+        let context = self.context()?;
+        let mut response = CallResponse::forward(&context.incoming_alkanes);
+
+        response.data = (*self.get_consts_pointer().get()).clone();
+
+        Ok(response)
+    }
+
+    /*
     fn get_is_registered(&self, vout: u128) -> Result<CallResponse> {
         let context = self.context()?;
         let mut response = CallResponse::forward(&context.incoming_alkanes);
@@ -177,6 +204,7 @@ impl Tortilla {
 
         Ok(response)
     }
+     */
 
     // ========================================================
 }

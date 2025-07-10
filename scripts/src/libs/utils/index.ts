@@ -97,10 +97,16 @@ export const deployContract = async (
 
     if (!events.create) throw new Error("no `create` event in trace output");
 
-    const { block, tx } = events.create as { block: bigint; tx: bigint };
-    const alkaneId: AlkaneId = { block, tx };
+    const alkaneId: AlkaneId = {
+      block: BigInt(events.create.block),
+      tx: BigInt(events.create.tx),
+    };
 
-    logger.success(`contract deployed at block ${block}, tx ${tx}`);
+    logger.success(
+      `contract deployed at block ${Number(alkaneId.block)}, tx ${Number(
+        alkaneId.tx
+      )}`
+    );
     root.close();
     return alkaneId;
   } catch (err) {
