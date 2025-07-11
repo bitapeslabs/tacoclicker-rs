@@ -7,7 +7,8 @@ import path from "path";
 import process from "process";
 import { fileURLToPath } from "url";
 
-/* Helpers */
+let SKIP_CIRCULAR_DEPENDENCY_CHECK = false;
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SRC_DIR = path.resolve(__dirname, "src");
 const TSCONFIG = path.resolve(__dirname, "tsconfig.json");
@@ -53,6 +54,8 @@ const madgeAlias = {
 
 /* 4 ─── Circular-dependency guard ───────────────────────────────────────── */
 async function checkCircularDependencies() {
+  if (SKIP_CIRCULAR_DEPENDENCY_CHECK) return;
+
   const result = await madge(SRC_DIR, {
     tsConfig: TSCONFIG, // honour path aliases / baseUrl
     fileExtensions: ["ts", "tsx", "js", "jsx"],

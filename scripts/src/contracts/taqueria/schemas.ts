@@ -1,4 +1,4 @@
-import { field, vec } from "@dao-xyz/borsh";
+import { field } from "@dao-xyz/borsh";
 
 export class SchemaAlkaneId {
   @field({ type: "u32" })
@@ -23,14 +23,6 @@ export class SchemaTortillaConsts {
     taqueria_factory_alkane_id: SchemaAlkaneId;
     salsa_alkane_id: SchemaAlkaneId;
   }) {
-    Object.assign(this, args);
-  }
-}
-export class SchemaAlkaneList {
-  @field({ type: vec(SchemaAlkaneId) })
-  alkanes!: SchemaAlkaneId[];
-
-  constructor(args: { alkanes: SchemaAlkaneId[] }) {
     Object.assign(this, args);
   }
 }

@@ -2,26 +2,30 @@ import { AlkanesSimulationResult } from "@/apis";
 import { hexToUint8Array } from "@/utils";
 import { Expand } from "@/utils";
 import { deserialize, Constructor, AbstractType } from "@dao-xyz/borsh";
+function bigintToBytesLE(num: bigint, byteLength: number): Uint8Array {
+  const bytes = new Uint8Array(byteLength);
+  let n = num;
 
-export function removeTrailingNullBytes(input: Uint8Array): Uint8Array {
-  let end = input.length;
-  while (end > 0 && input[end - 1] === 0) {
-    end--;
+  for (let i = 0; i < byteLength; i++) {
+    bytes[i] = Number(n & 0xffn);
+    n >>= 8n;
   }
-  return input.slice(0, end);
-}
 
+  return bytes;
+}
 export class DecodableAlkanesResponse<T> {
   public readonly bytes: Uint8Array;
   public readonly borshSchema?: Constructor<T> | AbstractType<T>;
 
   constructor(
-    payload: Uint8Array | AlkanesSimulationResult,
+    payload: Uint8Array | AlkanesSimulationResult | bigint,
     borshSchema?: Constructor<T> | AbstractType<T>
   ) {
     this.borshSchema = borshSchema;
     if (payload instanceof Uint8Array) {
       this.bytes = payload;
+    } else if (typeof payload === "bigint") {
+      this.bytes = bigintToBytesLE(payload, 16);
     } else if (payload.raw.execution.data) {
       this.bytes = hexToUint8Array(payload.raw.execution.data);
     } else {

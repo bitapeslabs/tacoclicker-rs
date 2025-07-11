@@ -4,7 +4,7 @@ import { Account, SpendStrategy } from "tacoclicker-sdk";
 import { Provider } from "tacoclicker-sdk";
 import type { BIP32Interface } from "bip32";
 import { Signer as OylSigner } from "@/libs/alkanes";
-import { provider, getPath } from "@/consts";
+import { provider, getPath, walletData } from "@/consts";
 import { AlkanesPayload } from "@/libs/alkanes/shared/types";
 import { gzip as _gzip } from "zlib";
 import { promisify } from "util";
@@ -23,7 +23,7 @@ export const getOylAccountFromSigner = (
   const { root } = signer;
 
   const derive = (purpose: number) => {
-    const hdPath = makePath(purpose, 0);
+    const hdPath = makePath(purpose, Number(walletData.index));
     const node = root.derivePath(hdPath);
     return { node, hdPath };
   };

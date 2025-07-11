@@ -9,7 +9,8 @@
   "scripts": {
     "tacoclicker": "node esbuild.config.mjs && node dist/index.js --tacoclicker",
     "freemint": "node esbuild.config.mjs && node dist/index.js --freemint",
-    "sandbox": "node esbuild.config.mjs && node dist/index.js --sandbox"
+    "sandbox": "node esbuild.config.mjs && node dist/index.js --sandbox",
+    "address": "node esbuild.config.mjs && node dist/index.js --address"
   },
   "dependencies": {
     "@dao-xyz/borsh": "^5.2.3",

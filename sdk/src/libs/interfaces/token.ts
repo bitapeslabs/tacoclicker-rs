@@ -11,6 +11,7 @@ import { Encodable } from "../encoders";
 import { AlkanesBaseContract, AlkanesPushExecuteResponse } from "./base";
 import { AlkanesSimulationError } from "./base";
 import { AlkanesExecuteError } from "../alkanes";
+import { AlkanesFetchError } from "@/apis";
 
 /*FOR REFRENCE: FREE MINT OP CODES
 /// Initialize the token with configuration
@@ -328,6 +329,38 @@ export class BaseTokenContract extends AlkanesBaseContract {
       return new BoxedError(
         AlkanesSimulationError.UnknownError,
         "Simulation failed: " + (error as Error).message
+      );
+    }
+  }
+
+  async viewGetBalance(
+    address: string
+  ): Promise<BoxedResponse<number, AlkanesFetchError>> {
+    try {
+      let outpoints = consumeOrThrow(
+        await this.provider.rpc.alkanes.alkanes_getAlkanesByAddress(address)
+      ).outpoints;
+
+      let target = `${this.alkaneId.block.toString()}:${this.alkaneId.tx.toString()}`;
+
+      let balance = outpoints.reduce((acc, outpoint) => {
+        let value = BigInt(
+          outpoint.runes.find(
+            (alkaneEntry) =>
+              `${BigInt(alkaneEntry.rune.id.block).toString()}:${BigInt(alkaneEntry.rune.id.tx).toString()}` ===
+              target
+          )?.balance ?? "0"
+        );
+        return acc + value;
+      }, 0n);
+
+      return new BoxedSuccess(
+        new DecodableAlkanesResponse(balance).toTokenValue(this.decimals)
+      );
+    } catch (error) {
+      return new BoxedError(
+        AlkanesFetchError.UnknownError,
+        "Failed to fetch balance: " + (error as Error).message
       );
     }
   }

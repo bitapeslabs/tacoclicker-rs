@@ -4,7 +4,7 @@ import {
   buildRpcCall as sandshrewBuildRpcCall,
 } from "@/apis/sandshrew/shared";
 
-import { execute, simulate } from "@/libs/alkanes";
+import { AlkanesExecuteError, execute, simulate } from "@/libs/alkanes";
 import {
   retryOnBoxedError,
   BoxedResponse,
@@ -92,7 +92,8 @@ export class Provider {
         console.warn(
           `EXECUTE: Attempt ${attempt + 1}: Failed to execute request (response: ${res.errorType + ": " + res.message}). Retrying...`
         );
-      }
+      },
+      [AlkanesExecuteError.UnknownError, AlkanesExecuteError.InvalidParams]
     );
   }
   simulate(

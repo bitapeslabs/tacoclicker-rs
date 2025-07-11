@@ -9,6 +9,8 @@ pub mod utils;
 
 use alkanes_runtime::storage::StoragePointer;
 use alkanes_runtime::{declare_alkane, message::MessageDispatch, runtime::AlkaneResponder};
+use alkanes_support::cellpack::Cellpack;
+use alkanes_support::id::AlkaneId;
 use alkanes_support::response::CallResponse;
 use anyhow::{anyhow, ensure, Result};
 use bitcoin::Transaction;
@@ -22,15 +24,15 @@ use std::io::Cursor;
 use std::sync::Arc;
 use token::MintableToken;
 
-use crate::schemas::SchemaTortillaConsts;
-use crate::utils::get_byte_array_from_inputs;
+use crate::schemas::{SchemaAlkaneId, SchemaAlkaneList, SchemaTortillaConsts};
+use crate::utils::{address_from_txout, get_byte_array_from_inputs, get_inputs_from_byte_array};
 
 #[derive(Default)]
 pub struct Tortilla(());
 
 impl MintableToken for Tortilla {}
 
-//STORAGE TORTILLA
+//STORAGE GETTERS TORTILLA
 impl Tortilla {
     fn get_consts_pointer(&self) -> StoragePointer {
         StoragePointer::from_keyword("/consts")
@@ -44,24 +46,8 @@ impl Tortilla {
             .map_err(|_| anyhow!("TORTILLA: Failed to deserialize consts"))
     }
 
-    fn get_caller_registration_pointer(&self, vout: usize) -> Result<StoragePointer> {
-        let caller_vout_id = self.get_caller_id_at_vout(vout)?;
-        Ok(StoragePointer::from_keyword("/registrations").select(&caller_vout_id))
-    }
-
-    fn get_caller_id_at_vout(&self, vout: usize) -> Result<Vec<u8>> {
-        let tx = self.get_serialized_transaction()?;
-
-        match tx.output.get(vout) {
-            Some(output) => Ok(output.script_pubkey.as_bytes().to_vec()),
-            None => Err(anyhow!("TORTILLA: invalid script pub key at vout")),
-        }
-    }
-
-    fn get_is_registered_value(&self, vout: usize) -> Result<Vec<u8>> {
-        let registration_pointer = self.get_caller_registration_pointer(vout)?;
-
-        Ok(registration_pointer.get().to_vec())
+    fn get_taquerias_pointer(&self, taqueria: &SchemaAlkaneId) -> Result<StoragePointer> {
+        Ok(StoragePointer::from_keyword("/taquerias").select(&borsh::to_vec(taqueria)?))
     }
 }
 
@@ -101,6 +87,14 @@ enum TortillaMessage {
     #[opcode(105)]
     #[returns(Vec<u8>)]
     GetConsts,
+
+    #[opcode(106)]
+    #[returns(Vec<u8>)] //Alkane ID
+    Register,
+
+    #[opcode(107)]
+    #[returns(Vec<u8>)] //First AlkaneID that corresponds to a valid taqueria
+    GetTaqueriaFromAlkaneList,
 
     #[opcode(1000)]
     #[returns(Vec<u8>)]
@@ -158,19 +152,14 @@ impl Tortilla {
         )?;
         Ok(response)
     }
+    */
 
     // The scriptpubkey @ 'vout' will be granted access
     // methods that should only be called by 'vout' will check if the sig of any vin was signed by the registered 'vout' scriptpubkey
     // This gives us account based functionality, in a utxo based environment.
-    fn register(&self, vout: u128) -> Result<CallResponse> {
-        let safe_vout: usize = vout
-            .try_into()
-            .map_err(|_| anyhow!("TORTILLA: failed to unwrap vout into usize"))?;
-
+    fn register(&self) -> Result<CallResponse> {
         let context = self.context()?;
-        let response = CallResponse::forward(&context.incoming_alkanes);
-
-        let mut registration_pointer = self.get_caller_registration_pointer(safe_vout)?;
+        let mut response = CallResponse::forward(&context.incoming_alkanes);
 
         let tx = self.get_serialized_transaction()?;
 
@@ -183,35 +172,91 @@ impl Tortilla {
 
         ensure!(
             total_value_to_funding >= FUNDING_PRICE_SATS,
-            "TORTILLA: for register (opcode 78) the parent tx must send {} sats to funding address {}",
+            "TORTILLA: for register,the parent tx must send {} sats to funding address {}",
             FUNDING_PRICE_SATS,
             FUNDING_ADDRESS
         );
 
-        let is_registered = u8::from_le_bytes(
-            self.get_is_registered_value(safe_vout)?
-                .try_into()
-                .map_err(|_| anyhow!("TORTILLA: invalid u128 at /registered"))?,
-        );
+        let consts = self.get_consts_value()?;
 
-        ensure!(
-            is_registered != 1,
-            "TORTILLA: this caller is already registered"
-        );
+        let next_alkane = SchemaAlkaneId {
+            block: 2u32,
+            tx: self.sequence().try_into()?,
+        };
 
-        //1= registered. 0=not registered
-        registration_pointer.set_value(1 as u8);
+        let mut calldata = vec![0u128];
+
+        calldata.extend_from_slice(&get_inputs_from_byte_array(&borsh::to_vec(
+            &SchemaAlkaneId {
+                block: context.myself.block.try_into()?,
+                tx: context.myself.block.try_into()?,
+            },
+        )?));
+
+        self.call(
+            &Cellpack {
+                target: AlkaneId {
+                    block: 5u128, //clone 2,n to 2,sequence
+                    tx: consts.taqueria_factory_alkane_id.tx.try_into()?,
+                },
+                inputs: calldata,
+            },
+            &response.alkanes,
+            self.fuel(),
+        )
+        .map_err(|err| {
+            anyhow!(
+                "{}{}{}{}",
+                "TORTILLA: failed to clone taqueria factory @ 2,",
+                consts.taqueria_factory_alkane_id.tx,
+                "brecause of error: ",
+                err.to_string()
+            )
+        })?;
+
+        //1 = exists. O(1) check to see if an alkane is a valid taqueria
+        self.get_taquerias_pointer(&next_alkane)?.set_value(1u8);
+
+        response.data = borsh::to_vec(&next_alkane)?;
 
         Ok(response)
     }
-     */
 
-    // ========================================================
+    fn get_taqueria_from_alkane_list(&self) -> Result<CallResponse> {
+        let context = self.context()?;
+        let mut response = CallResponse::forward(&context.incoming_alkanes);
+
+        let mut byte_reader = Cursor::new(get_byte_array_from_inputs(&context.inputs));
+
+        //Just one thing is passed to taqueria init, and that is the tortilla contract
+        let alkane_list = SchemaAlkaneList::deserialize_reader(&mut byte_reader)
+            .map_err(|_| anyhow!("TAQUERIA: Failed to decode parameters"))?
+            .alkanes;
+
+        let found_alkanes: Vec<SchemaAlkaneId> = alkane_list
+            .iter()
+            .filter_map(|taqueria| match self.get_taquerias_pointer(taqueria) {
+                Ok(ptr) => {
+                    if ptr.get_value::<u8>() == 1u8 {
+                        Some(taqueria.clone())
+                    } else {
+                        None
+                    }
+                }
+                Err(_) => None,
+            })
+            .collect();
+
+        response.data = borsh::to_vec(&SchemaAlkaneList {
+            alkanes: found_alkanes,
+        })?;
+
+        Ok(response)
+    }
 }
 
 impl AlkaneResponder for Tortilla {}
 
-// Use the MessageDispatch macro for opcode handling
 declare_alkane! {
     impl AlkaneResponder for Tortilla {
         type Message = TortillaMessage;

@@ -1,11 +1,12 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
-pub struct BorshWordCountRequest {
-    pub data: String,
+pub struct SchemaAlkaneId {
+    pub block: u32,
+    pub tx: u64,
 }
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
-pub struct BorshWordCountResponse {
-    pub data: String,
-    pub count: u16,
+pub struct SchemaTortillaConsts {
+    pub taqueria_factory_alkane_id: SchemaAlkaneId,
+    pub salsa_alkane_id: SchemaAlkaneId,
 }

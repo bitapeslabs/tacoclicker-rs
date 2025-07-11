@@ -4,6 +4,7 @@ import {
   BoxedResponse,
   consumeOrThrow,
   isBoxedError,
+  consumeAll,
 } from "@/boxed";
 import { Provider } from "@/provider";
 
@@ -29,6 +30,9 @@ import {
   AlkaneReadableId,
   AlkanesOutpoints,
   AlkanesOutpointsExtended,
+  AlkanesByAddressResponse,
+  AlkanesOutpointExtended,
+  AlkanesByAddressOutpoint,
 } from "../alkanes/types";
 
 import { FormattedUtxo } from "./types";
@@ -46,9 +50,9 @@ export class SandshrewRpcProvider {
     private readonly alkanesRpcProvider: AlkanesRpcProvider
   ) {}
 
-  async sandshrew_multcall(
-    rpcCalls: RpcCall<unknown>[]
-  ): Promise<BoxedResponse<unknown[], SandshrewFetchError>> {
+  async sandshrew_multcall<T>(
+    rpcCalls: RpcCall<T>[]
+  ): Promise<BoxedResponse<T[], SandshrewFetchError>> {
     const rpcTuples: RpcTuple[] = rpcCalls.map((rpcCall) => rpcCall.payload);
 
     try {
@@ -74,7 +78,9 @@ export class SandshrewRpcProvider {
         );
       }
 
-      return new BoxedSuccess(rpcResponse.map((response) => response.result));
+      return new BoxedSuccess(
+        rpcResponse.map((response) => response.result) as T[]
+      );
     } catch (error) {
       return new BoxedError(
         SandshrewFetchError.UnknownError,
@@ -90,19 +96,16 @@ export class SandshrewRpcProvider {
     address: string
   ): Promise<BoxedResponse<FormattedUtxo[], SandshrewFetchError>> {
     try {
-      /* 1.  Current chain height (for confirmation count) */
       const currentBlockHeight = Number(
         consumeOrThrow(
           await this.alkanesRpcProvider.alkanes_metashrewHeight().call()
         )
       );
 
-      /* 2.  All confirmed UTXOs for this address */
       const availableUtxos = consumeOrThrow(
         await this.electrumApiProvider.esplora_getutxos(address)
       );
 
-      /* 3.  Enrich each UTXO with its full previous transaction */
       const spendableInputs = consumeOrThrow(
         await this.electrumApiProvider.esplora_getspendableinputs(
           availableUtxos
@@ -113,8 +116,7 @@ export class SandshrewRpcProvider {
         spendableInputs.map((utxo) => [`${utxo.txid}:${utxo.vout}`, utxo])
       );
 
-      /* 4.  Fetch Ord output + Alkanes runes in two multicalls     */
-      const [ordOutputs, alkanesOutpointsMatrix] = (
+      const [ordOutputs, alkanesOutpointsResponse] = consumeAll(
         await Promise.all([
           this.sandshrew_multcall(
             availableUtxos.map((unspent) =>
@@ -123,35 +125,28 @@ export class SandshrewRpcProvider {
               )
             )
           ),
-          this.sandshrew_multcall(
-            availableUtxos.map((unspent) =>
-              this.alkanesRpcProvider.alkanes_getAlkanesByOutpoint(
-                unspent.txid,
-                unspent.vout
-              )
-            )
-          ),
+
+          this.alkanesRpcProvider.alkanes_getAlkanesByAddress(address),
+        ] as const)
+      );
+
+      const alkanesOutpointsByAddress = alkanesOutpointsResponse.outpoints;
+
+      const alkaneOutpointMap = new Map<string, AlkanesByAddressOutpoint>(
+        alkanesOutpointsByAddress.map((outpoint) => [
+          `${outpoint.outpoint.txid}:${outpoint.outpoint.vout}`,
+          outpoint,
         ])
-      ).map(consumeOrThrow) as [OrdOutput[], AlkanesOutpoints[]];
+      );
 
-      let alkanesOutpointsMatrixExtended: AlkanesOutpointsExtended[] =
-        alkanesOutpointsMatrix.map((alkaneBalance, index) => {
-          const utxo = availableUtxos[index];
-          const outpointId = `${utxo.txid}:${utxo.vout}`;
-
-          return alkaneBalance.map((alkane) => ({
-            ...alkane,
-            outpoint: outpointId,
-          }));
-        });
-
-      /* 5.  Assemble nicely-typed FormattedUtxo objects            */
       const formattedList: FormattedUtxo[] = [];
 
       for (let index = 0; index < availableUtxos.length; index++) {
         const rawUtxo = availableUtxos[index];
         const ordOutput = ordOutputs[index];
-        const alkanesOutpoints = alkanesOutpointsMatrixExtended[index];
+        const alkaneAddressOutput = alkaneOutpointMap.get(
+          `${rawUtxo.txid}:${rawUtxo.vout}`
+        );
 
         const spendableInput = spendableInputMap.get(
           `${rawUtxo.txid}:${rawUtxo.vout}`
@@ -168,27 +163,31 @@ export class SandshrewRpcProvider {
           currentBlockHeight -
           Number(spendableInput.prevTx.status.block_height);
 
-        const alkanesMap: Record<string, AlkanesUtxoEntry> =
-          alkanesOutpoints.reduce(
+        let alkanesMap: Record<string, AlkanesUtxoEntry> | undefined;
+
+        if (alkaneAddressOutput) {
+          alkanesMap = alkaneAddressOutput.runes.reduce(
             (acc, alkaneOutpoint) => {
-              const alkaneId = `${alkaneOutpoint.token.id.block}:${alkaneOutpoint.token.id.tx}`;
+              const alkaneId = `${alkaneOutpoint.rune.id.block}:${alkaneOutpoint.rune.id.tx}`;
 
               if (!acc[alkaneId]) {
                 acc[alkaneId] = {
-                  name: alkaneOutpoint.token.name,
-                  symbol: alkaneOutpoint.token.symbol,
+                  name: alkaneOutpoint.rune.name,
+                  symbol: alkaneOutpoint.rune.symbol,
                   value: "0",
+                  id: alkaneId,
                 };
               }
 
               acc[alkaneId].value = (
-                BigInt(acc[alkaneId].value) + BigInt(alkaneOutpoint.value)
+                BigInt(acc[alkaneId].value) + BigInt(alkaneOutpoint.balance)
               ).toString();
 
               return acc;
             },
             {} as Record<string, AlkanesUtxoEntry>
           );
+        }
 
         const formattedUtxo: FormattedUtxo = {
           txId: rawUtxo.txid,
@@ -201,7 +200,7 @@ export class SandshrewRpcProvider {
           indexed: confirmations > 0,
           inscriptions: ordOutput.inscriptions,
           runes: ordOutput.runes,
-          alkanes: alkanesMap,
+          alkanes: alkanesMap ?? {},
           prevTx: spendableInput.prevTx,
           prevTxHex: spendableInput.prevTx.hex,
         };

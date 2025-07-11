@@ -10,14 +10,21 @@ const readableAlkaneId = (id: AlkaneId) =>
   `(block→${Number(id.block)}n : tx→${Number(id.tx)}n)`;
 
 /** Deploy, initialise and mint a Free-Mint token contract. */
-export const runFreeMint = async (): Promise<boolean> => {
+export const runFreeMint = async (enableDeploy?: boolean): Promise<boolean> => {
   const root = logger.start("deploy & inspect free-mint token");
+  enableDeploy = enableDeploy ?? true;
 
   try {
-    const freeMintId = await deployContract(
-      path.join(__dirname, "../..", "./contracts/free-mint"),
-      [100n] // view-method quirk
-    );
+    const freeMintId = enableDeploy
+      ? await deployContract(
+          path.join(__dirname, "../..", "./contracts/free-mint"),
+          [100n] // view-method quirk
+        )
+      : ({
+          block: 2n,
+          tx: 75n,
+        } as AlkaneId);
+
     logger.success(`contract at ${readableAlkaneId(freeMintId)}`);
 
     const tokenContract = new BaseTokenContract(
@@ -29,8 +36,8 @@ export const runFreeMint = async (): Promise<boolean> => {
     await logger.progressExecute(
       "initialize",
       tokenContract.initialize(walletSigner.address, {
-        name: "Free Mint Token",
-        symbol: "FMT",
+        name: "test",
+        symbol: "TEST",
         valuePerMint: 10n,
         cap: 1000n,
         premine: 10_000n,
@@ -52,19 +59,24 @@ export const runFreeMint = async (): Promise<boolean> => {
           tokenContract.viewGetValuePerMint(),
           tokenContract.viewGetMinted(),
           tokenContract.viewGetCap(),
+          tokenContract.viewGetBalance(walletSigner.address),
         ] as const)
       )
     );
 
     logger.info("Asserting contract state...");
-    logger.deepAssert(tokenContractReturnValues, [
-      "Free Mint Token",
-      "FMT",
-      10_010, // totalSupply + minted
-      10, // valuePerMint
-      1, // minted
-      1000, // cap
-    ]);
+    logger.deepAssert(
+      [
+        "test",
+        "TEST",
+        10_010, // totalSupply + minted
+        10, // valuePerMint
+        1, // minted
+        1000, // cap
+        10_010, //balance (premine + mint)
+      ],
+      tokenContractReturnValues
+    );
     logger.success("All asserts passed. Contract state asserted successfully.");
 
     const [name, symbol, totalSupply, valuePerMint, minted, cap] =

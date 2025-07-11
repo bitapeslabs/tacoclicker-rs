@@ -7,22 +7,34 @@ pub mod schemas;
 pub mod token;
 pub mod utils;
 
-use alkanes_runtime::{declare_alkane, message::MessageDispatch, runtime::AlkaneResponder};
+use alkanes_runtime::{
+    declare_alkane, message::MessageDispatch, runtime::AlkaneResponder, storage::StoragePointer,
+};
 use alkanes_support::response::CallResponse;
 use anyhow::{anyhow, Result};
 
-use borsh::{from_slice, to_vec};
-use metashrew_support::compat::to_arraybuffer_layout;
-use schemas::{BorshWordCountRequest, BorshWordCountResponse};
+use borsh::{BorshDeserialize, BorshSerialize};
+use metashrew_support::{compat::to_arraybuffer_layout, index_pointer::KeyValuePointer};
+use std::io::Cursor;
 
 use token::MintableToken;
 
+use std::sync::Arc;
 use utils::get_byte_array_from_inputs;
+
+use crate::schemas::{SchemaAlkaneId, SchemaTortillaConsts};
 
 #[derive(Default)]
 pub struct Taqueria(());
 
 impl MintableToken for Taqueria {}
+
+//STORAGE GETTERS FOR TAQUERIA
+impl Taqueria {
+    fn get_tortilla_id_pointer(&self) -> StoragePointer {
+        StoragePointer::from_keyword("/tortilla")
+    }
+}
 
 #[derive(MessageDispatch)]
 enum TaqueriaMessage {
@@ -56,13 +68,10 @@ enum TaqueriaMessage {
     #[returns(u128)]
     GetValuePerMint,
 
+    //TAQUERIA FUNCTIONS START HERE
     #[opcode(105)]
-    #[returns(DecodableString)]
-    Echo,
-
-    #[opcode(106)]
-    #[returns(Vec<u8>)]
-    GetWordCount,
+    #[returns(u128)]
+    GetTortillaId,
 
     #[opcode(1000)]
     #[returns(Vec<u8>)]
@@ -71,12 +80,21 @@ enum TaqueriaMessage {
 
 impl Taqueria {
     fn initialize(&self) -> Result<CallResponse> {
-        let context = self.context()?;
-        let mut response = CallResponse::forward(&context.incoming_alkanes);
-
         // Prevent multiple initializations
         self.observe_initialization()
             .map_err(|_| anyhow!("Contract already initialized"))?;
+
+        let context = self.context()?;
+        let mut response = CallResponse::forward(&context.incoming_alkanes);
+
+        let mut byte_reader = Cursor::new(get_byte_array_from_inputs(&context.inputs));
+
+        //Just one thing is passed to taqueria init, and that is the tortilla contract
+        let tortilla_contract = SchemaAlkaneId::deserialize_reader(&mut byte_reader)
+            .map_err(|_| anyhow!("TAQUERIA: Failed to decode initialization parameters"))?;
+
+        self.get_tortilla_id_pointer()
+            .set(Arc::new(borsh::to_vec(&tortilla_contract)?));
 
         // Mint initial tokens
         response.alkanes.0.push(self.mint(&context, 1u128)?);
@@ -84,45 +102,12 @@ impl Taqueria {
         Ok(response)
     }
 
-    fn echo(&self) -> Result<CallResponse> {
-        let context = self.context()?;
-
-        let mut response = CallResponse::forward(&context.incoming_alkanes);
-
-        let inputs = self.context()?.inputs;
-
-        response.data = get_byte_array_from_inputs(&inputs);
-
-        Ok(response)
-    }
-
-    fn get_word_count(&self) -> Result<CallResponse> {
+    pub fn get_tortilla_id(&self) -> Result<CallResponse> {
         let context = self.context()?;
         let mut response = CallResponse::forward(&context.incoming_alkanes);
-        let inputs = self.context()?.inputs;
 
-        let request = from_slice::<BorshWordCountRequest>(&get_byte_array_from_inputs(&inputs))
-            .map_err(|_| anyhow!("TAQUERIA: Invalid request passed in"))?;
-
-        let word_count: u16 = request
-            .data
-            .chars()
-            .fold(0, |mut sum, x| {
-                if x == ' ' {
-                    sum += 1;
-                }
-                sum
-            })
-            .try_into()
-            .map_err(|_| anyhow!("TAQUERIA: Word overflow"))?;
-
-        let borsh_response = to_vec(&BorshWordCountResponse {
-            data: request.data,
-            count: word_count,
-        })
-        .map_err(|_| anyhow!("TAQUERIA: Word overflow"))?;
-
-        response.data = borsh_response;
+        //Bytes are of type SchemaAlkaneID
+        response.data = (*self.get_tortilla_id_pointer().get()).clone();
 
         Ok(response)
     }

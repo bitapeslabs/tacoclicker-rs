@@ -38,6 +38,7 @@ export type AlkanesUtxoEntry = {
   value: string;
   name: string;
   symbol: string;
+  id: string;
 };
 
 export type AlkanesOutpoint = {

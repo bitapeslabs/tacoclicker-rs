@@ -10,15 +10,22 @@ import {
   AlkanesExecuteError,
   Encodable,
   AlkanesExecuteResponse,
+  SingularBTCTransfer,
   AlkanesPushExecuteResponse,
 } from "tacoclicker-sdk";
 import { SchemaAlkaneId, SchemaTortillaConsts } from "./schemas";
 
 export class TortillaContract extends BaseTokenContract {
+  public static readonly TAQUERIA_COST_SATS = 21_000;
+  public static readonly TORTILLA_FUNDING_ADDRESS =
+    "bcrt1pluksgqq4kf0kwu3unj00p4mla3xk7tq5ay49wnewt8eydmq22mhsn4qdaw";
+
   public get OpCodes() {
     return {
       ...super.OpCodes,
       GetConsts: 105n,
+      Register: 106n,
+      GetTaqueriasFromAlkaneList: 107n,
     } as const;
   }
 
@@ -87,6 +94,35 @@ export class TortillaContract extends BaseTokenContract {
       return new BoxedError(
         AlkanesExecuteError.UnknownError,
         "Simulation failed: " + (error as Error).message
+      );
+    }
+  }
+  async register(
+    address: string,
+    amount: number = TortillaContract.TAQUERIA_COST_SATS
+  ): Promise<BoxedResponse<AlkanesPushExecuteResponse, AlkanesExecuteError>> {
+    try {
+      let callData: bigint[] = [this.OpCodes.Register]; // opcode for Register
+
+      let response = consumeOrThrow(
+        await this.pushExecute({
+          transfers: [
+            {
+              asset: "btc",
+              address: TortillaContract.TORTILLA_FUNDING_ADDRESS,
+              amount,
+            } as SingularBTCTransfer,
+          ],
+          address,
+          callData,
+        })
+      );
+
+      return new BoxedSuccess(response);
+    } catch (error) {
+      return new BoxedError(
+        AlkanesExecuteError.UnknownError,
+        "Execution failed: " + (error as Error).message
       );
     }
   }

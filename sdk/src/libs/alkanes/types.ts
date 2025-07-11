@@ -51,3 +51,28 @@ export interface SpendStrategy {
   utxoSortGreatestToLeast: boolean;
   changeAddress: AddressKey;
 }
+
+export type AlkanesUtxo = {
+  id: string;
+  value_sats: string;
+  block: number;
+  vout_index: number;
+  transaction: string | null;
+};
+export type AlkaneDetails = {
+  id: {
+    block: bigint;
+    tx: bigint;
+  };
+  name: string;
+  spacedName: string;
+  divisibility: number;
+  spacers: number;
+  symbol: string;
+};
+
+export interface AlkanesUtxoBalance {
+  balance: bigint;
+  utxo: AlkanesUtxo;
+  alkane: AlkaneDetails;
+}

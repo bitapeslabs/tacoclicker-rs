@@ -1,9 +1,10 @@
-import { AddressType } from "./types";
+import { AddressType, AlkanesUtxo } from "./types";
 import { addressFormats } from "@sadoprotocol/ordit-sdk";
 import * as bitcoin from "bitcoinjs-lib";
 import { FormattedUtxo } from "@/apis/sandshrew";
 import { Provider } from "@/provider";
 import * as z from "zod";
+import { AlkanesByAddressOutpoint, AlkanesOutpoint } from "@/apis";
 
 type BasePsbtParams = {
   feeRate?: number;
@@ -318,3 +319,83 @@ export const getEstimatedFee = async ({
     vsize,
   };
 };
+
+export function calculateTaprootTxSize(
+  taprootInputCount: number,
+  nonTaprootInputCount: number,
+  outputCount: number
+): number {
+  const baseTxSize = 10; // Base transaction size without inputs/outputs
+
+  // Size contributions from inputs
+  const taprootInputSize = 64; // Average size of a Taproot input (can vary)
+  const nonTaprootInputSize = 42; // Average size of a non-Taproot input (can vary)
+
+  const outputSize = 40;
+
+  const totalInputSize =
+    taprootInputCount * taprootInputSize +
+    nonTaprootInputCount * nonTaprootInputSize;
+  const totalOutputSize = outputCount * outputSize;
+
+  return baseTxSize + totalInputSize + totalOutputSize;
+}
+
+export const minimumFee = ({
+  taprootInputCount,
+  nonTaprootInputCount,
+  outputCount,
+}: {
+  taprootInputCount: number;
+  nonTaprootInputCount: number;
+  outputCount: number;
+}) => {
+  return calculateTaprootTxSize(
+    taprootInputCount,
+    nonTaprootInputCount,
+    outputCount
+  );
+};
+export function trimUndefined<T extends object>(obj: T): T {
+  const result = {} as T;
+
+  for (const key in obj) {
+    const value = obj[key];
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+
+  return result;
+}
+const DUMMY_SIG_73 = Buffer.alloc(73, 0);
+const DUMMY_PUB_33 = Buffer.alloc(33, 0);
+
+export function extractWithDummySigs(psbt: bitcoin.Psbt): bitcoin.Transaction {
+  const clone = psbt.clone();
+
+  clone.data.inputs.forEach((input, idx) => {
+    if (input.finalScriptSig || input.finalScriptWitness) return;
+
+    if (input.witnessUtxo) {
+      const witness = Buffer.concat([
+        Buffer.from("02", "hex"),
+        Buffer.from("49", "hex"),
+        DUMMY_SIG_73,
+        Buffer.from("21", "hex"),
+        DUMMY_PUB_33,
+      ]);
+      clone.updateInput(idx, { finalScriptWitness: witness });
+    } else {
+      const script = Buffer.concat([
+        Buffer.from("48", "hex"),
+        DUMMY_SIG_73,
+        Buffer.from("21", "hex"),
+        DUMMY_PUB_33,
+      ]);
+      clone.updateInput(idx, { finalScriptSig: script });
+    }
+  });
+
+  return clone.extractTransaction();
+}
