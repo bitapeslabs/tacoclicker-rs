@@ -135,12 +135,19 @@ export class Provider {
   waitForTraceResult = async (
     txid: string
   ): Promise<BoxedResponse<AlkanesParsedTraceResult, AlkanesTraceError>> => {
+    let tx = consumeOrThrow(
+      await retryOnBoxedError({
+        intervalMs: 1000,
+        timeoutMs: 10000,
+      })(() => this.rpc.electrum.esplora_gettransaction(txid))
+    );
+
     let result: AlkanesParsedTraceResult | undefined = undefined;
     let maxAttempts = 300;
     while (result === undefined) {
       let traceResults = await Promise.all([
-        this.trace(txid, 3),
-        this.trace(txid, 4),
+        this.trace(txid, tx.vout.length + 1),
+        this.trace(txid, tx.vout.length + 2),
       ]);
 
       let errors = traceResults.filter(isBoxedError);
@@ -160,12 +167,11 @@ export class Provider {
       if (success) {
         const createEvent = success.find((e) => e.event === "create");
         const invokeEvent = success.find((e) => e.event === "invoke")!; //There will always be an invoke event
-        const returnEvent = success.find((e) => e.event === "return")!; //There will always be a return event
-
+        const returnEvent = success.findLast((e) => e.event === "return")!; //There will always be a return event
         result = {
-          create: createEvent?.data,
-          invoke: invokeEvent?.data,
-          return: returnEvent?.data,
+          create: createEvent?.data as AlkanesTraceCreateEvent["data"],
+          invoke: invokeEvent?.data as AlkanesTraceInvokeEvent["data"],
+          return: returnEvent?.data as AlkanesTraceReturnEvent["data"],
         };
       }
 

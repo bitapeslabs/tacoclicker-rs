@@ -12,10 +12,10 @@ use alkanes_runtime::{declare_alkane, message::MessageDispatch, runtime::AlkaneR
 use alkanes_support::cellpack::Cellpack;
 use alkanes_support::id::AlkaneId;
 use alkanes_support::response::CallResponse;
-use anyhow::{anyhow, ensure, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use bitcoin::Transaction;
 
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::BorshDeserialize;
 use consts::{FUNDING_ADDRESS, FUNDING_PRICE_SATS};
 use metashrew_support::compat::to_arraybuffer_layout;
 use metashrew_support::index_pointer::KeyValuePointer;
@@ -25,7 +25,7 @@ use std::sync::Arc;
 use token::MintableToken;
 
 use crate::schemas::{SchemaAlkaneId, SchemaAlkaneList, SchemaTortillaConsts};
-use crate::utils::{address_from_txout, get_byte_array_from_inputs, get_inputs_from_byte_array};
+use crate::utils::{address_from_txout, bytes_to_u128_words, get_byte_array_from_inputs};
 
 #[derive(Default)]
 pub struct Tortilla(());
@@ -141,27 +141,16 @@ impl Tortilla {
         Ok(response)
     }
 
-    /*
-    fn get_is_registered(&self, vout: u128) -> Result<CallResponse> {
-        let context = self.context()?;
-        let mut response = CallResponse::forward(&context.incoming_alkanes);
-
-        response.data = self.get_is_registered_value(
-            vout.try_into()
-                .map_err(|_| anyhow!("TORTILLA: failed to unwrap vout into usize"))?,
-        )?;
-        Ok(response)
-    }
-    */
-
-    // The scriptpubkey @ 'vout' will be granted access
-    // methods that should only be called by 'vout' will check if the sig of any vin was signed by the registered 'vout' scriptpubkey
-    // This gives us account based functionality, in a utxo based environment.
     fn register(&self) -> Result<CallResponse> {
-        let context = self.context()?;
+        let context = self
+            .context()
+            .context("TORTILLA: failed to fetch call context")?;
+
         let mut response = CallResponse::forward(&context.incoming_alkanes);
 
-        let tx = self.get_serialized_transaction()?;
+        let tx = self
+            .get_serialized_transaction()
+            .context("TORTILLA: failed to get serialized parent transaction")?;
 
         let total_value_to_funding: u64 = tx
             .output
@@ -172,52 +161,65 @@ impl Tortilla {
 
         ensure!(
             total_value_to_funding >= FUNDING_PRICE_SATS,
-            "TORTILLA: for register,the parent tx must send {} sats to funding address {}",
-            FUNDING_PRICE_SATS,
-            FUNDING_ADDRESS
-        );
+            "TORTILLA: for register, the parent tx must send {FUNDING_PRICE_SATS} sats to funding address {FUNDING_ADDRESS}"
+    );
 
-        let consts = self.get_consts_value()?;
+        let consts = self
+            .get_consts_value()
+            .context("TORTILLA: failed to fetch on-chain consts")?;
 
+        let seq = self.sequence(); // capture once for logging
         let next_alkane = SchemaAlkaneId {
             block: 2u32,
-            tx: self.sequence().try_into()?,
+            tx: seq
+                .try_into()
+                .map_err(|_| anyhow!("TORTILLA: sequence {} overflows target integer", seq))?,
         };
 
-        let mut calldata = vec![0u128];
+        let pointer_id = SchemaAlkaneId {
+            block: context.myself.block.try_into().map_err(|_| {
+                anyhow!(
+                    "TORTILLA: context.myself.block {} does not fit into u32",
+                    context.myself.block
+                )
+            })?,
+            tx: context.myself.tx.try_into().map_err(|_| {
+                anyhow!(
+                    "TORTILLA: context.myself.block {} does not fit into u32",
+                    context.myself.block
+                )
+            })?,
+        };
 
-        calldata.extend_from_slice(&get_inputs_from_byte_array(&borsh::to_vec(
-            &SchemaAlkaneId {
-                block: context.myself.block.try_into()?,
-                tx: context.myself.block.try_into()?,
+        let pointer_bytes =
+            borsh::to_vec(&pointer_id).context("TORTILLA: failed to Borsh-serialize pointer_id")?;
+
+        let mut calldata: Vec<u128> = vec![0u128];
+        calldata.extend_from_slice(&bytes_to_u128_words(&pointer_bytes));
+
+        let cellpack = Cellpack {
+            target: AlkaneId {
+                block: 5u128, // clone 2,n to 2,sequence
+                tx: consts.taqueria_factory_alkane_id.tx.into(),
             },
-        )?));
+            inputs: calldata,
+        };
 
-        self.call(
-            &Cellpack {
-                target: AlkaneId {
-                    block: 5u128, //clone 2,n to 2,sequence
-                    tx: consts.taqueria_factory_alkane_id.tx.try_into()?,
-                },
-                inputs: calldata,
-            },
-            &response.alkanes,
-            self.fuel(),
-        )
-        .map_err(|err| {
-            anyhow!(
-                "{}{}{}{}",
-                "TORTILLA: failed to clone taqueria factory @ 2,",
-                consts.taqueria_factory_alkane_id.tx,
-                "brecause of error: ",
-                err.to_string()
-            )
-        })?;
+        self.call(&cellpack, &response.alkanes, self.fuel())
+            .map_err(|err| {
+                anyhow!(
+                    "TORTILLA: failed to clone taqueria factory @ 2,{}: {}",
+                    consts.taqueria_factory_alkane_id.tx,
+                    err
+                )
+            })?;
 
-        //1 = exists. O(1) check to see if an alkane is a valid taqueria
-        self.get_taquerias_pointer(&next_alkane)?.set_value(1u8);
+        self.get_taquerias_pointer(&next_alkane)
+            .context("TORTILLA: could not get taqueria pointer")?
+            .set_value(1u8);
 
-        response.data = borsh::to_vec(&next_alkane)?;
+        response.data = borsh::to_vec(&next_alkane)
+            .context("TORTILLA: failed to Borsh-serialize next_alkane")?;
 
         Ok(response)
     }

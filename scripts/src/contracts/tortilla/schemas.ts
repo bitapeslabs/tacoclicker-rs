@@ -1,36 +1,14 @@
-import { field, vec } from "@dao-xyz/borsh";
+import { BorshSchema, Infer as BorshInfer } from "borsher";
+import { schemaAlkaneId } from "tacoclicker-sdk";
 
-export class SchemaAlkaneId {
-  @field({ type: "u32" })
-  block!: number;
+export const schemaAlkaneList = BorshSchema.Struct({
+  alkanes: BorshSchema.Vec(schemaAlkaneId),
+});
 
-  @field({ type: "u64" })
-  tx!: number;
+export const schemaTortillaConsts = BorshSchema.Struct({
+  taqueria_factory_alkane_id: schemaAlkaneId,
+  salsa_alkane_id: schemaAlkaneId,
+});
 
-  constructor(args: { block: number; tx: number }) {
-    Object.assign(this, args);
-  }
-}
-
-export class SchemaTortillaConsts {
-  @field({ type: SchemaAlkaneId })
-  taqueria_factory_alkane_id!: SchemaAlkaneId;
-
-  @field({ type: SchemaAlkaneId })
-  salsa_alkane_id!: SchemaAlkaneId;
-
-  constructor(args: {
-    taqueria_factory_alkane_id: SchemaAlkaneId;
-    salsa_alkane_id: SchemaAlkaneId;
-  }) {
-    Object.assign(this, args);
-  }
-}
-export class SchemaAlkaneList {
-  @field({ type: vec(SchemaAlkaneId) })
-  alkanes!: SchemaAlkaneId[];
-
-  constructor(args: { alkanes: SchemaAlkaneId[] }) {
-    Object.assign(this, args);
-  }
-}
+export type ISchemaAlkaneList = BorshInfer<typeof schemaAlkaneList>;
+export type ISchemaTortillaConsts = BorshInfer<typeof schemaTortillaConsts>;

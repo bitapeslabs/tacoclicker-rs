@@ -1,7 +1,9 @@
-import { AlkanesSimulationResult } from "@/apis";
+import { AlkanesSimulationResult, AlkanesTraceReturnEvent } from "@/apis";
 import { hexToUint8Array } from "@/utils";
 import { Expand } from "@/utils";
-import { deserialize, Constructor, AbstractType } from "@dao-xyz/borsh";
+
+import { borshDeserialize, BorshSchema } from "borsher";
+
 function bigintToBytesLE(num: bigint, byteLength: number): Uint8Array {
   const bytes = new Uint8Array(byteLength);
   let n = num;
@@ -15,22 +17,46 @@ function bigintToBytesLE(num: bigint, byteLength: number): Uint8Array {
 }
 export class DecodableAlkanesResponse<T> {
   public readonly bytes: Uint8Array;
-  public readonly borshSchema?: Constructor<T> | AbstractType<T>;
+  public readonly borshSchema?: BorshSchema<T>;
 
   constructor(
-    payload: Uint8Array | AlkanesSimulationResult | bigint,
-    borshSchema?: Constructor<T> | AbstractType<T>
+    payload:
+      | Uint8Array
+      | bigint
+      | AlkanesSimulationResult
+      | AlkanesTraceReturnEvent["data"], // ← only the nested `data`
+    borshSchema?: BorshSchema<T>
   ) {
     this.borshSchema = borshSchema;
+
+    // 1. Already-binary
     if (payload instanceof Uint8Array) {
       this.bytes = payload;
-    } else if (typeof payload === "bigint") {
-      this.bytes = bigintToBytesLE(payload, 16);
-    } else if (payload.raw.execution.data) {
-      this.bytes = hexToUint8Array(payload.raw.execution.data);
-    } else {
-      throw new Error("Invalid payload type for Decodable");
+      return;
     }
+
+    // 2. BigInt → 16-byte little-endian
+    if (typeof payload === "bigint") {
+      this.bytes = bigintToBytesLE(payload, 16);
+      return;
+    }
+
+    // Tiny helper so we only write the conversion once
+    const toBytes = (hex: string): Uint8Array => hexToUint8Array(hex);
+
+    // 3. Simulation result (hex lives at raw.execution.data)
+    if ("raw" in payload && typeof payload.raw?.execution?.data === "string") {
+      this.bytes = toBytes(payload.raw.execution.data);
+      return;
+    }
+
+    // 4. Trace-return *data* (hex lives at response.data)
+    if ("response" in payload && typeof payload.response?.data === "bigint") {
+      this.bytes = bigintToBytesLE(payload.response.data, 16);
+      return;
+    }
+
+    throw new Error("DecodableAlkanesResponse: unsupported payload shape");
   }
 
   toString(): string {
@@ -97,9 +123,8 @@ export class DecodableAlkanesResponse<T> {
     if (!this.borshSchema) {
       throw new Error("Borsh deserialization function not provided");
     }
-    return deserialize(this.bytes, this.borshSchema);
+    return borshDeserialize(this.borshSchema, this.bytes);
   }
 }
-export type IDecodableAlkanesResponse = Expand<
-  (typeof DecodableAlkanesResponse)["prototype"]
->;
+
+export type IDecodableAlkanesResponse<T> = Expand<DecodableAlkanesResponse<T>>;

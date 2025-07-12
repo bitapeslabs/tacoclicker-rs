@@ -10,7 +10,12 @@ import {
   AlkanesExecuteError,
   Encodable,
 } from "tacoclicker-sdk";
-import { BorshWordCountRequest, BorshWordCountResponse } from "./schemas";
+import {
+  schemaWordCountRequest,
+  schemaWordCountResponse,
+  IWordCountRequest,
+  IWordCountResponse,
+} from "./schemas";
 
 export class SandboxContract extends BaseTokenContract {
   public get OpCodes() {
@@ -49,7 +54,7 @@ export class SandboxContract extends BaseTokenContract {
 
   async viewWordCount(
     string: string
-  ): Promise<BoxedResponse<BorshWordCountResponse, AlkanesExecuteError>> {
+  ): Promise<BoxedResponse<IWordCountResponse, AlkanesExecuteError>> {
     try {
       let callData: bigint[] = [
         this.OpCodes.wordCount, // opcode for Word Count
@@ -58,7 +63,7 @@ export class SandboxContract extends BaseTokenContract {
             {
               data: string,
             },
-            BorshWordCountRequest
+            schemaWordCountRequest
           ).fromObject()
         ),
       ];
@@ -71,7 +76,7 @@ export class SandboxContract extends BaseTokenContract {
 
       let decodable = new DecodableAlkanesResponse(
         response,
-        BorshWordCountResponse
+        schemaWordCountResponse
       );
       let decodedResponse = decodable.toObject();
 

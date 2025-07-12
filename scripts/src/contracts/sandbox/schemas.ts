@@ -1,22 +1,14 @@
-import { field } from "@dao-xyz/borsh";
+import { BorshSchema, Infer as BorshInfer } from "borsher";
 
-export class BorshWordCountRequest {
-  @field({ type: "string" })
-  public data!: string;
+export const schemaWordCountRequest = BorshSchema.Struct({
+  data: BorshSchema.String,
+});
 
-  constructor(args: { data: string }) {
-    Object.assign(this, args); // invariant: keep Rust-style init
-  }
-}
+export type IWordCountRequest = BorshInfer<typeof schemaWordCountRequest>;
 
-export class BorshWordCountResponse {
-  @field({ type: "string" })
-  public data!: string;
+export const schemaWordCountResponse = BorshSchema.Struct({
+  data: BorshSchema.String,
+  count: BorshSchema.u16,
+});
 
-  @field({ type: "u16" }) // Rust u16 → JS number
-  public count!: number;
-
-  constructor(args: { data: string; count: number }) {
-    Object.assign(this, args);
-  }
-}
+export type IWordCountResponse = BorshInfer<typeof schemaWordCountResponse>;

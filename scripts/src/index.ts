@@ -1,9 +1,5 @@
 // simulateFreeMint.ts
 import { commands } from "./scripts";
-import { taskLogger as logger, provider } from "@/consts";
-import { consumeAll, consumeOrThrow } from "./boxed";
-import { serialize, field } from "@dao-xyz/borsh";
-import { Encodable } from "tacoclicker-sdk";
 
 const main = async () => {
   const command =
@@ -24,15 +20,6 @@ const main = async () => {
   const commandFn = commands[command as keyof typeof commands];
   commandFn();
 };
-
-class TestStruct {
-  @field({ type: "string" })
-  public a: string | undefined;
-
-  constructor(data: { a?: string }) {
-    this.a = data.a;
-  }
-}
 
 process.removeAllListeners("warning");
 process.on("warning", (w) => {

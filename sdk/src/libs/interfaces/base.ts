@@ -22,6 +22,7 @@ import {
   DecodableAlkanesResponse,
 } from "../decoders";
 import { Expand } from "@/utils";
+import { BorshSchema } from "borsher";
 
 export enum AlkanesSimulationError {
   UnknownError = "UnknownError",
@@ -29,9 +30,9 @@ export enum AlkanesSimulationError {
 }
 export type OpcodeTable = { readonly [K in string]: bigint };
 
-export type AlkanesPushExecuteResponse = Expand<{
+export type AlkanesPushExecuteResponse<T> = Expand<{
   waitForResult: () => Promise<
-    BoxedResponse<IDecodableAlkanesResponse, AlkanesExecuteError>
+    BoxedResponse<IDecodableAlkanesResponse<T>, AlkanesExecuteError>
   >;
   txid: string;
 }>;
@@ -39,7 +40,7 @@ export type AlkanesPushExecuteResponse = Expand<{
 export abstract class AlkanesBaseContract {
   constructor(
     protected readonly provider: Provider,
-    protected readonly alkaneId: AlkaneId,
+    public readonly alkaneId: AlkaneId,
     private readonly signPsbtFn: (unsigned: string) => Promise<string>
   ) {}
   public abstract get OpCodes(): OpcodeTable;
@@ -65,10 +66,11 @@ export abstract class AlkanesBaseContract {
   ): ReturnType<Provider["simulate"]> {
     return this.provider.simulate({ target: this.alkaneId, ...request });
   }
-  pushExecute = async (
-    config: Parameters<Provider["execute"]>[0]
+  pushExecute = async <T>(
+    config: Parameters<Provider["execute"]>[0],
+    borshSchema?: BorshSchema<T>
   ): Promise<
-    BoxedResponse<AlkanesPushExecuteResponse, AlkanesExecuteError>
+    BoxedResponse<AlkanesPushExecuteResponse<T>, AlkanesExecuteError>
   > => {
     try {
       const unsignedPsbt = consumeOrThrow(
@@ -86,16 +88,14 @@ export abstract class AlkanesBaseContract {
 
       return new BoxedSuccess({
         waitForResult: async (): Promise<
-          BoxedResponse<IDecodableAlkanesResponse, AlkanesExecuteError>
+          BoxedResponse<IDecodableAlkanesResponse<T>, AlkanesExecuteError>
         > => {
           try {
             const traceResult = consumeOrThrow(
               await this.provider.waitForTraceResult(txid)
             );
             return new BoxedSuccess(
-              new DecodableAlkanesResponse(
-                hexToUint8Array(traceResult.return.response.data)
-              )
+              new DecodableAlkanesResponse(traceResult.return, borshSchema)
             );
           } catch (err) {
             return new BoxedError(

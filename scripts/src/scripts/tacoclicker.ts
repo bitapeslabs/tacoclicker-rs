@@ -5,12 +5,32 @@ import { TortillaContract } from "@/contracts/tortilla";
 import { provider } from "@/consts";
 import { walletSigner } from "@/crypto/wallet";
 import { taskLogger as logger } from "@/consts";
-import { consumeOrThrow } from "@/boxed";
+import {
+  consumeOrThrow,
+  BoxedResponse,
+  BoxedError,
+  isBoxedError,
+  BoxedSuccess,
+} from "@/boxed";
+import { ParsableAlkaneId } from "tacoclicker-sdk";
 
 const readableAlkaneId = (id: AlkaneId) =>
   `(block→${Number(id.block)}n : tx→${Number(id.tx)}n)`;
 
-const getContracts = async () => {
+const getContracts = async (enableDeploy: boolean) => {
+  if (!enableDeploy) {
+    return {
+      taqueriaFactoryAlkaneId: {
+        block: 2n,
+        tx: 93n,
+      } as AlkaneId,
+      tortillaAlkaneId: {
+        block: 2n,
+        tx: 94n,
+      } as AlkaneId,
+    };
+  }
+
   const taqueriaFactoryAlkaneId = await deployContract(
     path.join(__dirname, "../..", "./contracts/taqueria-factory"),
     [100n] // view-method quirk
@@ -29,6 +49,69 @@ const getContracts = async () => {
   };
 };
 
+enum TacoclickerRegisterError {
+  UnknownError = "UnknownError",
+  AssertFailure = "AssertFailure",
+}
+
+const testRegister = async (
+  tortillaContract: TortillaContract
+): Promise<BoxedResponse<boolean, TacoclickerRegisterError>> => {
+  try {
+    let taqueria = await logger.progressExecute(
+      "Register with insufficient funds",
+      tortillaContract.register(walletSigner.address, 20_000)
+    );
+
+    const expectedError = `TORTILLA: for register, the parent tx must send ${TortillaContract.TAQUERIA_COST_SATS} sats to funding address ${TortillaContract.TORTILLA_FUNDING_ADDRESS}`;
+
+    if (!isBoxedError(taqueria)) {
+      return new BoxedError(
+        TacoclickerRegisterError.AssertFailure,
+        `Expected error, but got success: ${JSON.stringify(taqueria)}`
+      );
+    } else if (!taqueria.message?.includes(expectedError)) {
+      return new BoxedError(
+        TacoclickerRegisterError.AssertFailure,
+        `Expected error message to include "${expectedError}", but got: ${taqueria.message}`
+      );
+    }
+
+    logger.success("Asserted insufficient funds error: " + taqueria.message);
+
+    //If this passes the register is working
+    const taqueria2 = consumeOrThrow(
+      await logger.progressExecute(
+        "Register with sufficient funds",
+        tortillaContract.register(walletSigner.address)
+      )
+    ).toObject();
+
+    logger.success(
+      "Taqueria registered successfully: " +
+        readableAlkaneId(new ParsableAlkaneId(taqueria2).toAlkaneId())
+    );
+
+    const addressTaqueria = new ParsableAlkaneId(
+      consumeOrThrow(
+        await logger.progressAbstract(
+          "getAddressTaqueria",
+          tortillaContract.viewGetTaqueria(walletSigner.address)
+        )
+      ).alkaneId
+    ).toSchemaAlkaneId();
+
+    logger.deepAssert(addressTaqueria, taqueria2);
+    return new BoxedSuccess(true);
+  } catch (error) {
+    logger.error(error as Error);
+    return new BoxedError(
+      TacoclickerRegisterError.UnknownError,
+      "Registration failed: " + (error as Error).message
+    );
+  }
+};
+
 export const runTacoClicker = async (
   enableDeploy?: boolean
 ): Promise<boolean> => {
@@ -37,18 +120,7 @@ export const runTacoClicker = async (
   const root = logger.start("deploy & inspect taco clicker contracts");
 
   try {
-    let contracts = enableDeploy
-      ? await getContracts()
-      : {
-          taqueriaFactoryAlkaneId: {
-            block: 2n,
-            tx: 64n,
-          } as AlkaneId,
-          tortillaAlkaneId: {
-            block: 2n,
-            tx: 65n,
-          } as AlkaneId,
-        };
+    let contracts = await getContracts(enableDeploy);
 
     logger.success(
       `contract at ${readableAlkaneId(contracts.tortillaAlkaneId)}`
@@ -65,14 +137,15 @@ export const runTacoClicker = async (
         await logger.progressExecute(
           "Initialize",
           tortillaContract.initialize(walletSigner.address, {
-            taqueria_factory_alkane_id: {
-              block: Number(contracts.taqueriaFactoryAlkaneId.block),
-              tx: Number(contracts.taqueriaFactoryAlkaneId.tx),
-            },
-            salsa_alkane_id: {
-              block: 0, // Placeholder, replace with actual salsa alkane id if needed
-              tx: 0, // Placeholder, replace with actual salsa alkane id if needed
-            },
+            taqueria_factory_alkane_id: new ParsableAlkaneId(
+              contracts.taqueriaFactoryAlkaneId
+            ).toSchemaAlkaneId(),
+
+            //PLACEHOLDERS. TODO: CHANGE
+            salsa_alkane_id: new ParsableAlkaneId({
+              block: 0,
+              tx: 0n,
+            }).toSchemaAlkaneId(),
           })
         )
       );
@@ -82,19 +155,21 @@ export const runTacoClicker = async (
       await logger.progressAbstract("getConsts", tortillaContract.getConsts())
     );
 
+    logger.info("Asserting tortilla contract state...");
     logger.deepAssert(
       {
-        taqueria_factory_alkane_id: {
-          block: Number(contracts.taqueriaFactoryAlkaneId.block),
-          tx: Number(contracts.taqueriaFactoryAlkaneId.tx),
-        },
-        salsa_alkane_id: {
-          block: 0, // Placeholder, replace with actual salsa alkane id if needed
-          tx: 0, // Placeholder, replace with actual salsa alkane id if needed
-        },
+        taqueria_factory_alkane_id: new ParsableAlkaneId(
+          contracts.taqueriaFactoryAlkaneId
+        ).toSchemaAlkaneId(),
+        salsa_alkane_id: new ParsableAlkaneId({
+          block: 0,
+          tx: 0n,
+        }).toSchemaAlkaneId(),
       },
       consts
     );
+
+    consumeOrThrow(await testRegister(tortillaContract));
 
     root.close();
     return true;

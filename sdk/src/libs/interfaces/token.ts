@@ -103,7 +103,9 @@ export class BaseTokenContract extends AlkanesBaseContract {
       name: string;
       symbol: string;
     }
-  ): Promise<BoxedResponse<AlkanesPushExecuteResponse, AlkanesExecuteError>> {
+  ): Promise<
+    BoxedResponse<AlkanesPushExecuteResponse<void>, AlkanesExecuteError>
+  > {
     try {
       let paramSchema = z.object({
         premine: u128Schema.optional(),
@@ -161,7 +163,9 @@ export class BaseTokenContract extends AlkanesBaseContract {
 
   async mintTokens(
     address: string
-  ): Promise<BoxedResponse<AlkanesPushExecuteResponse, AlkanesExecuteError>> {
+  ): Promise<
+    BoxedResponse<AlkanesPushExecuteResponse<void>, AlkanesExecuteError>
+  > {
     try {
       let callData: bigint[] = [this.OpCodes.MintTokens]; // opcode for MintTokens
 

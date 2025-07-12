@@ -10,8 +10,7 @@ import {
   AlkanesExecuteError,
   AlkanesPushExecuteResponse,
 } from "tacoclicker-sdk";
-import { SchemaAlkaneId, SchemaTortillaConsts } from "./schemas";
-
+import { schemaAlkaneId, ISchemaAlkaneId } from "tacoclicker-sdk";
 export class TaqueriaContract extends BaseTokenContract {
   public get OpCodes() {
     return {
@@ -23,8 +22,10 @@ export class TaqueriaContract extends BaseTokenContract {
   // @ts-expect-error override signature on purpose
   public override async initialize(
     address: string,
-    tortillaAlkaneId: SchemaAlkaneId
-  ): Promise<BoxedResponse<AlkanesPushExecuteResponse, AlkanesExecuteError>> {
+    tortillaAlkaneId: ISchemaAlkaneId
+  ): Promise<
+    BoxedResponse<AlkanesPushExecuteResponse<void>, AlkanesExecuteError>
+  > {
     throw new Error(
       `Taqueria factory must be initialized through the Tortilla contract. 
 While you can call this method, not cloning through the Tortilla contract will decouple your 
@@ -34,7 +35,7 @@ game from Tortilla and you will not be allowed to mint tortillas.
   }
 
   async getTortillaId(): Promise<
-    BoxedResponse<SchemaAlkaneId, AlkanesExecuteError>
+    BoxedResponse<ISchemaAlkaneId, AlkanesExecuteError>
   > {
     try {
       let callData: bigint[] = [this.OpCodes.GetTortillaId]; // opcode for GetConsts
@@ -48,7 +49,7 @@ game from Tortilla and you will not be allowed to mint tortillas.
       return new BoxedSuccess(
         new DecodableAlkanesResponse(
           simulationResult,
-          SchemaAlkaneId
+          schemaAlkaneId
         ).toObject()
       );
     } catch (error) {

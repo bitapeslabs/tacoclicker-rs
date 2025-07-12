@@ -87,14 +87,11 @@ impl Taqueria {
         let context = self.context()?;
         let mut response = CallResponse::forward(&context.incoming_alkanes);
 
-        let mut byte_reader = Cursor::new(get_byte_array_from_inputs(&context.inputs));
-
-        //Just one thing is passed to taqueria init, and that is the tortilla contract
-        let tortilla_contract = SchemaAlkaneId::deserialize_reader(&mut byte_reader)
-            .map_err(|_| anyhow!("TAQUERIA: Failed to decode initialization parameters"))?;
-
         self.get_tortilla_id_pointer()
-            .set(Arc::new(borsh::to_vec(&tortilla_contract)?));
+            .set(Arc::new(borsh::to_vec(&SchemaAlkaneId {
+                block: context.caller.block.try_into()?,
+                tx: context.caller.tx.try_into()?,
+            })?));
 
         // Mint initial tokens
         response.alkanes.0.push(self.mint(&context, 1u128)?);

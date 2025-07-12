@@ -1,6 +1,6 @@
 import { BoxedResponse, BoxedSuccess, BoxedError } from "@/boxed";
 import { Expand } from "@/utils";
-import { AbstractType, Constructor, serialize } from "@dao-xyz/borsh";
+import { borshSerialize, BorshSchema } from "borsher";
 function encodeStringToU128Array(str: string): bigint[] {
   const encoder = new TextEncoder();
   const data = encoder.encode(str);
@@ -56,9 +56,9 @@ enum EncodeError {
 
 export class Encodable<T> {
   public readonly payload: unknown;
-  public readonly borshSchema?: Constructor<T>;
+  public readonly borshSchema?: BorshSchema<T>;
 
-  constructor(payload: unknown, borshSchema?: Constructor<T>) {
+  constructor(payload: unknown, borshSchema?: BorshSchema<T>) {
     this.payload = payload;
     this.borshSchema = borshSchema;
   }
@@ -124,7 +124,7 @@ export class Encodable<T> {
     }
 
     return new BoxedSuccess(
-      encodeUintArrayToU128Array(serialize(new this.borshSchema(this.payload)))
+      encodeUintArrayToU128Array(borshSerialize(this.borshSchema, this.payload))
     );
   }
 }

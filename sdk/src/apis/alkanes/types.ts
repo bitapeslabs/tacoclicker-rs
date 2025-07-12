@@ -220,7 +220,7 @@ export interface AlkanesTraceReturnEvent {
     status: "success" | "revert";
     response: {
       alkanes: Alkane[];
-      data: string;
+      data: bigint;
       storage: {
         key: string;
         value: bigint;

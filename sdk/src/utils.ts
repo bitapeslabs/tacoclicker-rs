@@ -1,3 +1,6 @@
+import { AlkaneId } from "./apis";
+import { ISchemaAlkaneId } from "./libs/schemas";
+
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export function hexToUint8Array(hex: string): Uint8Array {
   if (hex.startsWith("0x")) hex = hex.slice(2);
@@ -22,3 +25,21 @@ export function excludeFields<K, T extends object>(
   return filtered as K;
 }
 export type Expand<T> = T extends infer O ? { [K in keyof O]: O[K] } : never;
+
+export class ParsableAlkaneId {
+  constructor(public readonly alkaneId: AlkaneId | ISchemaAlkaneId) {}
+
+  toSchemaAlkaneId(): ISchemaAlkaneId {
+    return {
+      block: Number(this.alkaneId.block),
+      tx: BigInt(this.alkaneId.tx),
+    };
+  }
+
+  toAlkaneId(): AlkaneId {
+    return {
+      block: BigInt(this.alkaneId.block),
+      tx: BigInt(this.alkaneId.tx),
+    };
+  }
+}

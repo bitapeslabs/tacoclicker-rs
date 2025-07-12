@@ -5,9 +5,10 @@ import {
   BoxedResponse,
   BoxedSuccess,
   consumeOrThrow,
+  IBoxedSuccess,
 } from "@/boxed";
 import chalk from "chalk";
-import ora, { Ora } from "ora";
+import ora, { Ora, spinners } from "ora";
 import {
   AlkanesExecuteError,
   AlkanesPushExecuteResponse,
@@ -17,6 +18,10 @@ const G = { branch: "├─ ", last: "└─ ", vert: "│  ", blank: "   " };
 
 interface Frame {
   last: boolean;
+}
+
+enum LoggerError {
+  UnknownError = "UnknownError",
 }
 
 export class TaskLogger {
@@ -86,15 +91,26 @@ export class TaskLogger {
     }).start();
   }
 
-  async progressExecute<
-    T extends BoxedResponse<AlkanesPushExecuteResponse, AlkanesExecuteError>
-  >(
+  async progressExecute<T>(
     functionName: string,
-    executeResponse: Promise<T>
-  ): Promise<ReturnType<AlkanesPushExecuteResponse["waitForResult"]>> {
+    executeResponse: Promise<
+      BoxedResponse<AlkanesPushExecuteResponse<T>, AlkanesExecuteError>
+    >
+
+    //iliketurtles
+  ): Promise<
+    BoxedResponse<
+      Extract<
+        Awaited<ReturnType<AlkanesPushExecuteResponse<T>["waitForResult"]>>,
+        IBoxedSuccess<unknown>
+      >["data"],
+      LoggerError
+    >
+  > {
+    let spinner = this.progress(`submitting ${functionName} tx…`);
+
     try {
       this.info(`Executing ${functionName}…`);
-      let spinner = this.progress(`submitting ${functionName} tx…`);
       let { txid, waitForResult } = consumeOrThrow(await executeResponse);
       spinner.succeed(`Done. Txid: ${txid}`);
 
@@ -104,27 +120,31 @@ export class TaskLogger {
 
       return new BoxedSuccess(res);
     } catch (error) {
-      throw (
-        "Error during progressExecute: " +
-        (error instanceof Error ? error.message : String(error))
+      spinner.stop();
+      return new BoxedError(
+        LoggerError.UnknownError,
+        "Execution failed: " + (error as Error).message
       );
     }
   }
 
   async progressAbstract<T>(
     functionName: string,
-    functionResponse: Promise<T> | T
-  ): Promise<T> {
+    functionResponse:
+      | Promise<BoxedResponse<T, string>>
+      | BoxedResponse<T, string>
+  ): Promise<BoxedResponse<T, LoggerError>> {
     const spinner = this.progress(`executing ${functionName}…`);
     try {
-      const result = await functionResponse;
+      const result = consumeOrThrow(await functionResponse);
       spinner.succeed(`Done.`);
-      return result;
+      return new BoxedSuccess(result as T);
     } catch (error) {
-      spinner.fail(`Failed.`);
-      throw (
-        "Error during progressAbstract: " +
-        (error instanceof Error ? error.message : String(error))
+      spinner.stop();
+
+      return new BoxedError(
+        LoggerError.UnknownError,
+        "Error during progressAbstract: " + (error as Error).message
       );
     }
   }

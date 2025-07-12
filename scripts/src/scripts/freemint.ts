@@ -49,19 +49,18 @@ export const runFreeMint = async (enableDeploy?: boolean): Promise<boolean> => {
       tokenContract.mintTokens(walletSigner.address)
     );
 
-    let tokenContractReturnValues = await logger.progressAbstract(
-      "read contract state",
-      consumeAll(
-        await Promise.all([
-          tokenContract.viewGetName(),
-          tokenContract.viewGetSymbol(),
-          tokenContract.viewGetTotalSupply(),
-          tokenContract.viewGetValuePerMint(),
-          tokenContract.viewGetMinted(),
-          tokenContract.viewGetCap(),
-          tokenContract.viewGetBalance(walletSigner.address),
-        ] as const)
-      )
+    await logger.info("Getting contract state…");
+
+    let tokenContractReturnValues = consumeAll(
+      await Promise.all([
+        tokenContract.viewGetName(),
+        tokenContract.viewGetSymbol(),
+        tokenContract.viewGetTotalSupply(),
+        tokenContract.viewGetValuePerMint(),
+        tokenContract.viewGetMinted(),
+        tokenContract.viewGetCap(),
+        tokenContract.viewGetBalance(walletSigner.address),
+      ] as const)
     );
 
     logger.info("Asserting contract state...");
