@@ -29,30 +29,28 @@ export class DecodableAlkanesResponse<T> {
   ) {
     this.borshSchema = borshSchema;
 
-    // 1. Already-binary
     if (payload instanceof Uint8Array) {
       this.bytes = payload;
       return;
     }
 
-    // 2. BigInt → 16-byte little-endian
     if (typeof payload === "bigint") {
       this.bytes = bigintToBytesLE(payload, 16);
       return;
     }
 
-    // Tiny helper so we only write the conversion once
-    const toBytes = (hex: string): Uint8Array => hexToUint8Array(hex);
-
-    // 3. Simulation result (hex lives at raw.execution.data)
     if ("raw" in payload && typeof payload.raw?.execution?.data === "string") {
-      this.bytes = toBytes(payload.raw.execution.data);
+      this.bytes = hexToUint8Array(payload.raw.execution.data);
       return;
     }
 
-    // 4. Trace-return *data* (hex lives at response.data)
     if ("response" in payload && typeof payload.response?.data === "bigint") {
       this.bytes = bigintToBytesLE(payload.response.data, 16);
+      return;
+    }
+
+    if ("response" in payload && typeof payload.response?.data === "string") {
+      this.bytes = hexToUint8Array(payload.response.data);
       return;
     }
 

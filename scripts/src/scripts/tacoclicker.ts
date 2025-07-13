@@ -13,6 +13,7 @@ import {
   BoxedSuccess,
 } from "@/boxed";
 import { ParsableAlkaneId } from "tacoclicker-sdk";
+import { TaqueriaContract } from "@/contracts/taqueria";
 
 const readableAlkaneId = (id: AlkaneId) =>
   `(block→${Number(id.block)}n : tx→${Number(id.tx)}n)`;
@@ -22,11 +23,11 @@ const getContracts = async (enableDeploy: boolean) => {
     return {
       taqueriaFactoryAlkaneId: {
         block: 2n,
-        tx: 93n,
+        tx: 146n,
       } as AlkaneId,
       tortillaAlkaneId: {
         block: 2n,
-        tx: 94n,
+        tx: 147n,
       } as AlkaneId,
     };
   }
@@ -92,6 +93,18 @@ const testRegister = async (
         readableAlkaneId(new ParsableAlkaneId(taqueria2).toAlkaneId())
     );
 
+    const registeredTaqueria = new TaqueriaContract(
+      provider,
+      new ParsableAlkaneId(taqueria2).toAlkaneId(),
+      walletSigner.signPsbt
+    );
+
+    const balance = consumeOrThrow(
+      await registeredTaqueria.viewGetBalance(walletSigner.address)
+    );
+
+    logger.deepAssert(1e-8, balance); // unitary balance check
+
     const addressTaqueria = new ParsableAlkaneId(
       consumeOrThrow(
         await logger.progressAbstract(
@@ -101,7 +114,12 @@ const testRegister = async (
       ).alkaneId
     ).toSchemaAlkaneId();
 
-    logger.deepAssert(addressTaqueria, taqueria2);
+    logger.deepAssert(
+      addressTaqueria,
+      taqueria2,
+      [],
+      "This is WARNONLY because mismatches can happen if the address has registered multiple taquerias, but this is not an issue because only the first one gets shown on frontend."
+    );
     return new BoxedSuccess(true);
   } catch (error) {
     logger.error(error as Error);

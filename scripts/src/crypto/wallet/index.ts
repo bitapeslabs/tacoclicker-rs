@@ -171,19 +171,23 @@ export async function signPsbt(
   walletSigner: WalletSigner
 ): Promise<string> {
   try {
-    // Validate the input PSBT
     const psbt = bitcoin.Psbt.fromBase64(base64Psbt, {
       network: provider.network,
     });
 
     const signer = toTaprootSigner(walletSigner);
 
-    psbt.signAllInputs(signer);
-    psbt.finalizeAllInputs();
+    for (let i = 0; i < psbt.inputCount; i++) {
+      const input = psbt.data.inputs[i];
 
-    let tx = psbt.extractTransaction().toHex();
+      // Skip inputs already finalized (have finalScriptWitness or finalScriptSig)
+      if (input.finalScriptWitness || input.finalScriptSig) continue;
 
-    return tx;
+      psbt.signInput(i, signer);
+      psbt.finalizeInput(i);
+    }
+
+    return psbt.extractTransaction().toHex();
   } catch (error) {
     console.error("Error signing PSBT:", error);
     throw new Error("Failed to sign PSBT");

@@ -11,6 +11,7 @@ use alkanes_runtime::storage::StoragePointer;
 use alkanes_runtime::{declare_alkane, message::MessageDispatch, runtime::AlkaneResponder};
 use alkanes_support::cellpack::Cellpack;
 use alkanes_support::id::AlkaneId;
+use alkanes_support::parcel::AlkaneTransfer;
 use alkanes_support::response::CallResponse;
 use anyhow::{anyhow, ensure, Context, Result};
 use bitcoin::Transaction;
@@ -217,6 +218,15 @@ impl Tortilla {
         self.get_taquerias_pointer(&next_alkane)
             .context("TORTILLA: could not get taqueria pointer")?
             .set_value(1u8);
+
+        //transfer the alkane out of the initilzation contract to the main unallocated alkanes
+        response.alkanes.0.push(AlkaneTransfer {
+            id: AlkaneId {
+                block: next_alkane.block.into(),
+                tx: next_alkane.tx.into(),
+            },
+            value: 1u128,
+        });
 
         response.data = borsh::to_vec(&next_alkane)
             .context("TORTILLA: failed to Borsh-serialize next_alkane")?;

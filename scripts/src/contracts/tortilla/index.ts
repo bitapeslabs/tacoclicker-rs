@@ -185,8 +185,6 @@ export class TortillaContract extends BaseTokenContract {
         schemaAlkaneList
       );
 
-      console.log("Hex: " + result.toHex());
-
       return new BoxedSuccess(result.toObject().alkanes);
     } catch (error) {
       console.error("Error in viewGetTaquerias:", error);

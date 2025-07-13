@@ -10,7 +10,8 @@
     "tacoclicker": "node esbuild.config.mjs && node dist/index.js --tacoclicker",
     "freemint": "node esbuild.config.mjs && node dist/index.js --freemint",
     "sandbox": "node esbuild.config.mjs && node dist/index.js --sandbox",
-    "address": "node esbuild.config.mjs && node dist/index.js --address"
+    "address": "node esbuild.config.mjs && node dist/index.js --address",
+    "testinscription": "node esbuild.config.mjs && node dist/index.js --testinscription"
   },
   "dependencies": {
     "@magiceden-oss/runestone-lib": "^1.0.2",
@@ -36,6 +37,7 @@
     "ora": "^8.2.0",
     "tacoclicker-sdk": "file:../sdk",
     "tiny-async-pool": "^2.1.0",
+    "varuint-bitcoin": "^2.0.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

@@ -76,6 +76,10 @@ export class TaskLogger {
   success(msg: string) {
     console.log(this.prefix(true) + chalk.green("✓ " + msg));
   }
+
+  warn(msg: string) {
+    console.log(this.prefix(true) + chalk.yellow("! " + msg));
+  }
   error(msg: string | Error) {
     console.error(
       this.prefix(true) +
@@ -149,11 +153,21 @@ export class TaskLogger {
     }
   }
 
-  deepAssert(expected: unknown, actual: unknown, path: string[] = []): void {
+  deepAssert(
+    expected: unknown,
+    actual: unknown,
+    path: string[] = [],
+    warnReason?: string // ← NEW: explain why we’re warning
+  ): void {
     const here = path.length ? path.join(".") : "(root)";
+
+    // warn is active if a non-empty reason was provided
+    const warnEnabled = !!warnReason && warnReason.trim().length > 0;
+    const reasonSuffix = warnEnabled ? ` (reason: ${warnReason})` : "";
 
     const repr = (v: unknown) => util.inspect(v, { depth: 1, colors: false });
 
+    /* ─────────── primitive / null / undefined ─────────── */
     if (
       typeof expected !== "object" ||
       expected === null ||
@@ -166,57 +180,71 @@ export class TaskLogger {
         );
         return;
       }
-      this.error(
-        `Value mismatch at ${here}: expected ${repr(expected)}, got ${repr(
-          actual
-        )}`
-      );
+
+      const msg = `Value mismatch at ${here}: expected ${repr(
+        expected
+      )}, got ${repr(actual)}`;
+      if (warnEnabled) {
+        this.warn(`(warning) ${msg}${reasonSuffix}`);
+        return;
+      }
+      this.error(msg);
       throw new Error(`deepAssert failed at ${here}`);
     }
 
+    /* ─────────── arrays ─────────── */
     if (Array.isArray(expected) || Array.isArray(actual)) {
       if (!Array.isArray(expected) || !Array.isArray(actual)) {
-        this.error(`Type mismatch at ${here}: one is array, the other is not`);
+        const msg = `Type mismatch at ${here}: one is array, the other is not`;
+        if (warnEnabled) {
+          this.warn(`(warning) ${msg}${reasonSuffix}`);
+          return;
+        }
+        this.error(msg);
         throw new Error(`deepAssert failed at ${here}`);
       }
+
       if (expected.length !== actual.length) {
-        this.error(
-          `Length mismatch at ${here}: expected ${expected.length}, got ${actual.length}`
-        );
+        const msg = `Length mismatch at ${here}: expected ${expected.length}, got ${actual.length}`;
+        if (warnEnabled) {
+          this.warn(`(warning) ${msg}${reasonSuffix}`);
+          return;
+        }
+        this.error(msg);
         throw new Error(`deepAssert failed at ${here}`);
       }
+
       expected.forEach((expItem, i) =>
-        this.deepAssert(expItem, actual[i], [...path, `[${i}]`])
+        this.deepAssert(expItem, actual[i], [...path, `[${i}]`], warnReason)
       );
       return;
     }
 
-    // Plain objects
+    /* ─────────── plain objects ─────────── */
     const expObj = expected as Record<string, unknown>;
     const actObj = actual as Record<string, unknown>;
 
     const expKeys = Object.keys(expObj);
     const actKeys = Object.keys(actObj);
 
-    // Key set comparison
     if (
       expKeys.length !== actKeys.length ||
       !expKeys.every((k) => actKeys.includes(k))
     ) {
-      this.error(
-        `Key mismatch at ${here}: expected keys ${repr(expKeys)}, got ${repr(
-          actKeys
-        )}`
-      );
+      const msg = `Key mismatch at ${here}: expected keys ${repr(
+        expKeys
+      )}, got ${repr(actKeys)}`;
+      if (warnEnabled) {
+        this.warn(`(warning) ${msg}${reasonSuffix}`);
+        return;
+      }
+      this.error(msg);
       throw new Error(`deepAssert failed at ${here}`);
     }
 
-    // Recurse per key
     for (const key of expKeys) {
-      this.deepAssert(expObj[key], actObj[key], [...path, key]);
+      this.deepAssert(expObj[key], actObj[key], [...path, key], warnReason);
     }
-    // Successful object comparison is logged by field checks
   }
 }
-
 export const taskLogger = new TaskLogger();

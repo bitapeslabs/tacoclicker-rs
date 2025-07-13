@@ -3,9 +3,20 @@ import { addressFormats } from "@sadoprotocol/ordit-sdk";
 import * as bitcoin from "bitcoinjs-lib";
 import { FormattedUtxo } from "@/apis/sandshrew";
 import { Provider } from "@/provider";
-import * as z from "zod";
-import { AlkanesByAddressOutpoint, AlkanesOutpoint } from "@/apis";
+import * as varuint from "varuint-bitcoin";
+import {
+  AlkanesByAddressOutpoint,
+  AlkanesOutpoint,
+  IEsploraPrevout,
+  IEsploraTransaction,
+  IEsploraTransactionStatus,
+  IEsploraVin,
+  IEsploraVout,
+} from "@/apis";
+import { ecc } from "@/crypto/ecc";
+import ECPairFactory from "ecpair";
 
+export const EcPair = ECPairFactory(ecc);
 type BasePsbtParams = {
   feeRate?: number;
   fee?: number;
@@ -68,7 +79,6 @@ export function addInputDynamic(
 ) {
   const prevTx = utxo.prevTx;
   const prevOut = prevTx.vout[utxo.outputIndex];
-
   const scriptBuf = Buffer.from(prevOut.scriptpubkey, "hex");
   const addrType = getAddressType(prevOut.scriptpubkey_address); // <- now enum
 
@@ -244,7 +254,43 @@ const SIZES = {
     output: 9, // Base size
   },
 };
+function classifyScript(script: Buffer): string {
+  // easy segwit matches by length/header
+  if (script.length === 22 && script[0] === 0x00 && script[1] === 0x14)
+    return "v0_p2wpkh";
+  if (script.length === 34 && script[0] === 0x00 && script[1] === 0x20)
+    return "v0_p2wsh";
+  if (script.length === 34 && script[0] === 0x51 && script[1] === 0x20)
+    return "v1_p2tr";
 
+  // decompile legacy patterns
+  const chunks = bitcoin.script.decompile(script);
+  if (!chunks) return "nonstandard";
+
+  const [op0, op1, data, op3, op4] = chunks;
+
+  if (
+    chunks.length === 5 &&
+    op0 === bitcoin.opcodes.OP_DUP &&
+    op1 === bitcoin.opcodes.OP_HASH160 &&
+    Buffer.isBuffer(data) &&
+    data.length === 20 &&
+    op3 === bitcoin.opcodes.OP_EQUALVERIFY &&
+    op4 === bitcoin.opcodes.OP_CHECKSIG
+  )
+    return "p2pkh";
+
+  if (
+    chunks.length === 3 &&
+    op0 === bitcoin.opcodes.OP_HASH160 &&
+    Buffer.isBuffer(chunks[1]) &&
+    (chunks[1] as Buffer).length === 20 &&
+    op3 === bitcoin.opcodes.OP_EQUAL
+  )
+    return "p2sh";
+
+  return "nonstandard";
+}
 export const getEstimatedFee = async ({
   provider,
   feeRate,
@@ -398,4 +444,141 @@ export function extractWithDummySigs(psbt: bitcoin.Psbt): bitcoin.Transaction {
   });
 
   return clone.extractTransaction();
+}
+
+export function toEsploraTx(
+  tx: bitcoin.Transaction,
+  status: IEsploraTransactionStatus = { confirmed: false },
+  network: bitcoin.Network = bitcoin.networks.bitcoin
+): IEsploraTransaction {
+  /* ──────────────  VOUT  ────────────── */
+  const vout: IEsploraVout[] = tx.outs.map((out) => {
+    const scriptBuf = out.script;
+    const scriptHex = scriptBuf.toString("hex");
+    const scriptAsm = bitcoin.script.toASM(scriptBuf);
+
+    /* classify → “wpkh”, “wsh”, “pkh”, “sh”, “tr”, … */
+    const short = classifyScript(scriptBuf);
+    const scriptpubkey_type =
+      short === "wpkh"
+        ? "v0_p2wpkh"
+        : short === "wsh"
+          ? "v0_p2wsh"
+          : short === "tr"
+            ? "v1_p2tr"
+            : short === "pkh"
+              ? "p2pkh"
+              : short === "sh"
+                ? "p2sh"
+                : "nonstandard";
+
+    /* best-effort address decode */
+    let address = "";
+    try {
+      address = bitcoin.address.fromOutputScript(scriptBuf, network);
+    } catch {
+      /* nonstandard / anyone-can-spend */
+    }
+
+    return {
+      scriptpubkey: scriptHex,
+      scriptpubkey_asm: scriptAsm,
+      scriptpubkey_type,
+      scriptpubkey_address: address,
+      value: out.value,
+    };
+  });
+
+  /* ──────────────  VIN  ────────────── */
+  const vin: IEsploraVin[] = tx.ins.map((input) => ({
+    txid: Buffer.from(input.hash).reverse().toString("hex"),
+    vout: input.index,
+    prevout: undefined, // fill later if you have it
+    scriptsig: input.script.toString("hex"),
+    scriptsig_asm: bitcoin.script.toASM(input.script),
+    witness: input.witness.map((w) => w.toString("hex")),
+    is_coinbase: tx.isCoinbase(),
+    sequence: input.sequence,
+  }));
+
+  /* ──────────  FEE, SIZE, WEIGHT  ────────── */
+  const outputValueSum = vout.reduce((sum, o) => sum + o.value, 0);
+
+  /* Only compute fee if every vin.prevout has a value ≥ 0 */
+  const allPrevoutValuesKnown = vin.every(
+    (v) => v.prevout && typeof v.prevout.value === "number"
+  );
+
+  const inputValueSum = allPrevoutValuesKnown
+    ? vin.reduce((sum, v) => sum + (v.prevout!.value as number), 0)
+    : 0;
+
+  const fee =
+    allPrevoutValuesKnown && !tx.isCoinbase()
+      ? inputValueSum - outputValueSum
+      : 0;
+
+  const size = tx.byteLength();
+  const weight = tx.weight();
+
+  return {
+    txid: tx.getId(),
+    version: tx.version,
+    locktime: tx.locktime,
+    vin,
+    vout,
+    size,
+    weight,
+    fee,
+    status,
+  };
+}
+export function witnessStackToScriptWitness(stack: Buffer[]): Buffer {
+  const parts: Buffer[] = [];
+
+  // stack item count (var-int)
+  parts.push(varuint.encode(stack.length));
+
+  // each item: <len><bytes>
+  for (const item of stack) {
+    parts.push(varuint.encode(item.length));
+    parts.push(item);
+  }
+  return Buffer.concat(parts);
+}
+export function tapTweakHash(pubKey: Buffer, h: Buffer | undefined): Buffer {
+  return bitcoin.crypto.taggedHash(
+    "TapTweak",
+    Buffer.concat(h ? [pubKey, h] : [pubKey])
+  );
+}
+
+export const assertHex = (pubKey: Buffer) =>
+  pubKey.length === 32 ? pubKey : pubKey.slice(1, 33);
+
+export function tweakSigner(
+  signer: bitcoin.Signer,
+  opts: any = {}
+): bitcoin.Signer {
+  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+  // @ts-ignore
+  let privateKey: Uint8Array | undefined = signer.privateKey!;
+  if (!privateKey) {
+    throw new Error("Private key required");
+  }
+  if (signer.publicKey[0] === 3) {
+    privateKey = ecc.privateNegate(privateKey);
+  }
+
+  const tweakedPrivateKey = ecc.privateAdd(
+    privateKey,
+    tapTweakHash(assertHex(signer.publicKey), opts.tweakHash)
+  );
+  if (!tweakedPrivateKey) {
+    throw new Error("Invalid tweaked private key!");
+  }
+
+  return EcPair.fromPrivateKey(Buffer.from(tweakedPrivateKey), {
+    network: opts.network,
+  });
 }

@@ -1,8 +1,27 @@
-import { Psbt, Transaction, address, networks, payments } from "bitcoinjs-lib";
-import { extractWithDummySigs } from "./utils";
+import {
+  Psbt,
+  Signer,
+  Transaction,
+  address,
+  networks,
+  payments,
+  script,
+} from "bitcoinjs-lib";
+import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
+import { ECPairFactory, ECPairInterface } from "ecpair";
+import { LEAF_VERSION_TAPSCRIPT } from "bitcoinjs-lib/src/payments/bip341";
 
-import type { FormattedUtxo, AlkanesUtxoEntry, AlkaneId } from "@/apis";
+import { randomBytes } from "crypto";
+import { witnessStackToScriptWitness } from "./utils";
+import { extractWithDummySigs, toEsploraTx } from "./utils";
 
+import type {
+  FormattedUtxo,
+  AlkanesUtxoEntry,
+  AlkaneId,
+  IEsploraTransaction,
+} from "@/apis";
+import { borshSerialize } from "borsher";
 import {
   BoxedError,
   type BoxedResponse,
@@ -10,12 +29,21 @@ import {
   isBoxedError,
 } from "@/boxed";
 import chalk from "chalk";
-import { addInputDynamic, trimUndefined } from "./utils";
+import { addInputDynamic, trimUndefined, tweakSigner } from "./utils";
 import { Provider } from "@/provider";
-import { encipher, encodeRunestoneProtostone, ProtoStone } from "alkanes";
+import {
+  encipher,
+  encodeRunestoneProtostone,
+  p2tr_ord_reveal,
+  ProtoStone,
+} from "alkanes";
 import { ProtoruneRuneId } from "alkanes/lib/protorune/protoruneruneid";
 import { consumeOrThrow } from "@/boxed";
 import { u128, u32 } from "@magiceden-oss/runestone-lib/dist/src/integer";
+import { BorshSchema } from "borsher";
+import { EcPair } from "./utils";
+
+type PsbtInputExtended = Parameters<Psbt["addInput"]>[0];
 
 type IEdict = NonNullable<ProtoStone["edicts"]>[number];
 
@@ -29,6 +57,186 @@ type IFeeOpts = {
   vsize: number;
   input_length: number;
 };
+
+type IAvailableUtxoTweakOptions = {
+  remove: Set<string>;
+  add: FormattedUtxo[];
+};
+
+export class AlkanesInscription<T> {
+  constructor(
+    public readonly shape: T,
+    public readonly borshSchema: BorshSchema<T>
+  ) {}
+}
+
+export class ProtostoneTransactionWithInscription<T> {
+  private commitBuilder!: ProtostoneTransaction;
+  private revealBuilder!: ProtostoneTransaction;
+  private script!: Buffer;
+  private commitPsbt?: Psbt;
+  private tweakedDummySigner: Signer;
+  private tweakedPublicKey: string;
+  private revealPsbt?: Psbt;
+  private utxoTweak: IAvailableUtxoTweakOptions = {
+    remove: new Set(),
+    add: [],
+  };
+
+  constructor(
+    private readonly changeAddress: string,
+    private readonly inscription: AlkanesInscription<T>,
+    private readonly opts: ProtostoneTransactionOptions
+  ) {
+    this.tweakedDummySigner = tweakSigner(
+      EcPair.makeRandom({
+        network: this.opts.provider.network,
+      })
+    );
+    this.tweakedPublicKey = this.tweakedDummySigner.publicKey.toString("hex");
+  }
+
+  public async buildCommit(): Promise<Psbt> {
+    if (this.commitPsbt) return this.commitPsbt;
+
+    const commitTransfer: SingularBTCTransfer = {
+      asset: "btc",
+      amount: 546,
+      address: this.taprootAddress(),
+    };
+    const guessBuilder = new ProtostoneTransaction(this.changeAddress, {
+      ...this.opts,
+      transfers: [commitTransfer],
+      excludeProtostone: true,
+    });
+    await guessBuilder.build();
+    const dummyTx = await guessBuilder.finalizeWithDry();
+
+    const feeOpts = {
+      vsize: dummyTx.virtualSize(),
+      input_length: 3,
+    };
+
+    this.commitBuilder = new ProtostoneTransaction(this.changeAddress, {
+      ...this.opts,
+      transfers: [commitTransfer],
+      feeOpts,
+      excludeProtostone: true,
+    });
+    await this.commitBuilder.build();
+    this.commitPsbt = this.commitBuilder.getPsbt();
+
+    return this.commitPsbt;
+  }
+
+  public finalizeCommit(txHex: string) {
+    const tx = Transaction.fromHex(txHex);
+    let txEsplora = toEsploraTx(tx);
+
+    //Make sure we arent using these utxos in the building of reveal
+    txEsplora.vin.forEach((input, index) => {
+      this.utxoTweak.remove!.add(`${input.txid}:${input.vout}`);
+    });
+    tx.outs.forEach((output, index) => {
+      this.utxoTweak.add.push({
+        txId: tx.getId(),
+        outputIndex: index,
+        satoshis: output.value,
+        scriptPk: output.script.toString("hex"),
+        prevTx: txEsplora,
+        prevTxHex: txHex,
+        inscriptions: [],
+        runes: {},
+        address: this.changeAddress,
+        confirmations: 1,
+        indexed: true,
+        alkanes: {},
+      });
+    });
+  }
+
+  public async buildReveal(): Promise<Psbt> {
+    if (this.revealPsbt) return this.revealPsbt;
+
+    const p2pk_redeem = { output: this.script };
+
+    const { output, witness } = payments.p2tr({
+      internalPubkey: toXOnly(Buffer.from(this.tweakedPublicKey, "hex")),
+      scriptTree: p2pk_redeem,
+      redeem: p2pk_redeem,
+      network: this.opts.provider.network,
+    });
+
+    let commitTxInput: PsbtInputExtended = {
+      hash: this.utxoTweak.add[0].txId,
+      index: 0,
+      witnessUtxo: {
+        value: this.utxoTweak.add[0].satoshis,
+        script: output ?? Buffer.from(""),
+      },
+      tapLeafScript: [
+        {
+          leafVersion: LEAF_VERSION_TAPSCRIPT,
+          script: p2pk_redeem.output,
+          controlBlock: witness![witness!.length - 1],
+        },
+      ],
+    };
+
+    const dry = await getDummyProtostoneTransaction(this.changeAddress, {
+      ...this.opts,
+      includeInputs: [commitTxInput],
+      availableUtxoTweak: this.utxoTweak,
+    });
+    if (isBoxedError(dry)) throw new Error(dry.message);
+
+    this.revealBuilder = new ProtostoneTransaction(this.changeAddress, {
+      ...this.opts,
+      includeInputs: [commitTxInput],
+      availableUtxoTweak: this.utxoTweak,
+      feeOpts: dry.data.feeOpts,
+    });
+    await this.revealBuilder.build();
+    this.revealPsbt = this.revealBuilder.getPsbt();
+
+    this.revealPsbt.signInput(0, this.tweakedDummySigner);
+    this.revealPsbt.finalizeInput(0);
+    return this.revealPsbt;
+  }
+
+  public extractPsbts(): [string, string] {
+    if (!this.commitPsbt || !this.revealPsbt)
+      throw new Error("Build both PSBTs first");
+    return [this.commitPsbt.toBase64(), this.revealPsbt.toBase64()];
+  }
+
+  private taprootAddress(): string {
+    const bytes = new Uint8Array(
+      borshSerialize(this.inscription.borshSchema, this.inscription.shape)
+    );
+
+    const script = Buffer.from(
+      p2tr_ord_reveal(toXOnly(Buffer.from(this.tweakedPublicKey, "hex")), [
+        {
+          body: bytes,
+          cursed: false,
+          tags: { contentType: "" },
+        },
+      ]).script
+    );
+    const inscriberInfo = payments.p2tr({
+      internalPubkey: toXOnly(Buffer.from(this.tweakedPublicKey, "hex")),
+      scriptTree: {
+        output: script,
+      },
+      network: this.opts.provider.network,
+    });
+
+    this.script = script;
+
+    return inscriberInfo.address!;
+  }
+}
 
 export class ProtostoneTransaction {
   private MINIMUM_FEE = 500;
@@ -59,6 +267,7 @@ export class ProtostoneTransaction {
     feeOpts?: IFeeOpts;
     feeRate?: number;
     //signPsbt: LaserEyesClient["signPsbt"]; transaction is unfinalized
+    availableUtxoTweak?: IAvailableUtxoTweakOptions;
 
     //Dont try to include inputs when buyer is trying to transfer alkanes out of the psbts
     ignoreAlkanesRequirementCheck?: boolean;
@@ -72,12 +281,19 @@ export class ProtostoneTransaction {
     If true, it will force these inputs to be present in the transaction and not include anything else.  This is useful for UTXO creation,
     where we want to determine the inputs that we need in a deterministic fashion, and override looking for inputs to fulfill the alkanes requirements
     */;
+
+    /*
+      useful for reveals on inscriptions
+    */
+    includeInputs?: PsbtInputExtended[];
+
     includePsbts?: string[];
     /*
     Will forecully include these inputs in the transaction even if they arent needed. This is for PSBT buy orders that need to include
     the inputs they are trying to buy. This is different from overrideInputs, because these inputs are included alongside inputs the tx factory
     uses to satisfy 'transfers'.
   */
+    excludeProtostone?: boolean; // If true, it will not include the Protostone in the transaction
   };
 
   private changeAddress: string;
@@ -101,12 +317,18 @@ export class ProtostoneTransaction {
       feeRate: options.feeRate ?? options.provider.defaultFeeRate,
       psbtTransfers: options.psbtTransfers ?? [],
       overrideInputs: options.overrideInputs ?? null,
+      includeInputs: options.includeInputs ?? [],
       includePsbts: options.includePsbts ?? [],
+      availableUtxoTweak: options.availableUtxoTweak ?? {
+        remove: new Set(),
+        add: [],
+      },
       ignoreAlkanesRequirementCheck:
         options.ignoreAlkanesRequirementCheck ?? false,
       ignoreAlkanesUtxoCheck: options.ignoreAlkanesUtxoCheck ?? false,
       transfers: options.transfers ?? [],
       callData: options.callData ?? [],
+      excludeProtostone: options.excludeProtostone ?? false,
     };
   }
 
@@ -130,7 +352,19 @@ export class ProtostoneTransaction {
   private async fetchResources(): Promise<void> {
     this.availableUtxos = consumeOrThrow(
       await this.sandshrew_getFormattedUtxosForAddress(this.changeAddress)
+    ).filter(
+      (utxo) =>
+        !this.transactionOptions.availableUtxoTweak?.remove!.has(
+          `${utxo.txId}:${utxo.outputIndex}`
+        )
     );
+
+    this.transactionOptions.availableUtxoTweak!.add!.forEach((utxo) => {
+      if (this.availableUtxos.some((u) => u.txId === utxo.txId)) {
+        return; // already in available UTXOs
+      }
+      this.availableUtxos.push(utxo);
+    });
 
     /*
       On the first "dry" run, there will be no vsize, so the fee will be 500 * minimumRate - which is the minimum for the network
@@ -279,6 +513,7 @@ export class ProtostoneTransaction {
       accumulated += Number(alkanesUtxo.satoshis);
       utxosToMeetRequirementsSet.set(utxoId, esploraUtxo);
     }
+
     for (const utxo of sortedUtxos) {
       const utxoId = `${utxo.txId}:${utxo.outputIndex}`;
       if (!this.isUnlockedUtxo(utxo)) {
@@ -397,6 +632,10 @@ export class ProtostoneTransaction {
   }
 
   private addInputs(): void {
+    for (const input of this.transactionOptions.includeInputs ?? []) {
+      this.psbt.addInput(input);
+    }
+
     for (const utxo of this.utxos) {
       this.addInputDynamic(utxo);
     }
@@ -459,6 +698,10 @@ export class ProtostoneTransaction {
   }
 
   private addProtostoneData(edicts?: IEdict[]): Buffer | undefined {
+    if (this.transactionOptions.excludeProtostone) {
+      return undefined;
+    }
+
     const protostoneBuffer = encodeRunestoneProtostone({
       protostones: [
         ProtoStone.message({
@@ -488,30 +731,20 @@ export class ProtostoneTransaction {
     const sellerOutpt = sellerPsbt.txOutputs[0];
     const txInput = sellerPsbt.txInputs[0]; // outpoint + sequence
 
-    // Safety: ensure it’s finalized (has either finalScriptWitness or finalScriptSig)
     if (!sellerInput.finalScriptWitness && !sellerInput.finalScriptSig) {
       throw new Error("Seller PSBT is not finalized / missing signatures");
     }
 
-    /* ----------------------- ADD INPUT ----------------------- */
     this.psbt.addInput(
       trimUndefined({
         hash: txInput.hash,
         index: txInput.index,
         sequence: txInput.sequence,
-
-        // For SegWit / Taproot
         witnessUtxo: sellerInput.witnessUtxo,
         tapInternalKey: sellerInput.tapInternalKey,
         witnessScript: sellerInput.witnessScript,
-
-        // For legacy P2PKH (or P2SH)
         nonWitnessUtxo: sellerInput.nonWitnessUtxo,
-
-        // For P2SH or P2SH-P2WPKH
         redeemScript: sellerInput.redeemScript,
-
-        // The already-finalized data
         finalScriptSig: sellerInput.finalScriptSig,
         finalScriptWitness: sellerInput.finalScriptWitness,
       })
