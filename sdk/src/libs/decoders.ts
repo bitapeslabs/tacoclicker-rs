@@ -1,128 +1,144 @@
+/*─────────────────────────────────────────────────────────────
+  DECODABLE ALKANES RESPONSE – single `decodeTo` API
+──────────────────────────────────────────────────────────────*/
 import { AlkanesSimulationResult, AlkanesTraceReturnEvent } from "@/apis";
 import { hexToUint8Array } from "@/utils";
-import { Expand } from "@/utils";
-
 import { borshDeserialize, BorshSchema } from "borsher";
 
-function bigintToBytesLE(num: bigint, byteLength: number): Uint8Array {
-  const bytes = new Uint8Array(byteLength);
-  let n = num;
-
-  for (let i = 0; i < byteLength; i++) {
-    bytes[i] = Number(n & 0xffn);
+/*------------------------------------------------------------*
+ | helpers                                                    |
+ *------------------------------------------------------------*/
+function bigintToLE(value: bigint, len = 16): Uint8Array {
+  const out = new Uint8Array(len);
+  let n = value;
+  for (let i = 0; i < len; i++) {
+    out[i] = Number(n & 0xffn);
     n >>= 8n;
   }
-
-  return bytes;
+  return out;
 }
-export class DecodableAlkanesResponse<T> {
-  public readonly bytes: Uint8Array;
-  public readonly borshSchema?: BorshSchema<T>;
+function leBytesToBigint(bytes: Uint8Array): bigint {
+  let n = 0n;
+  for (let i = 0; i < bytes.length; i++) {
+    n |= BigInt(bytes[i]) << (8n * BigInt(i));
+  }
+  return n;
+}
 
+/*------------------------------------------------------------*
+ | decoder-function signatures – declared **once** here        |
+ *------------------------------------------------------------*/
+export interface DecoderFns<Obj> {
+  string: (bytes: Uint8Array) => string;
+  boolean: (bytes: Uint8Array) => boolean;
+  bigint: (bytes: Uint8Array) => bigint;
+  hex: (bytes: Uint8Array) => string;
+  uint8Array: (bytes: Uint8Array) => Uint8Array;
+  bigintArray: (bytes: Uint8Array) => bigint[];
+  tokenValue: (bytes: Uint8Array) => number; // fixed-8
+  object: (bytes: Uint8Array) => Obj; // Borsh
+}
+
+/** all legal strings accepted by `decodeTo` */
+export type AvailableDecodeKind = keyof DecoderFns<unknown>; // → union of the keys above
+
+/*------------------------------------------------------------*
+ |  main class                                                |
+ *------------------------------------------------------------*/
+export class DecodableAlkanesResponse<T = unknown> {
+  readonly bytes: Uint8Array;
+  private readonly borshSchema?: BorshSchema<T>;
+
+  /*──────────────────────────────────────────────────────────*/
   constructor(
     payload:
       | Uint8Array
       | bigint
       | AlkanesSimulationResult
-      | AlkanesTraceReturnEvent["data"], // ← only the nested `data`
-    borshSchema?: BorshSchema<T>
+      | AlkanesTraceReturnEvent["data"],
+    schema?: BorshSchema<T>
   ) {
-    this.borshSchema = borshSchema;
+    this.borshSchema = schema;
 
     if (payload instanceof Uint8Array) {
       this.bytes = payload;
-      return;
-    }
-
-    if (typeof payload === "bigint") {
-      this.bytes = bigintToBytesLE(payload, 16);
-      return;
-    }
-
-    if ("raw" in payload && typeof payload.raw?.execution?.data === "string") {
+    } else if (typeof payload === "bigint") {
+      this.bytes = bigintToLE(payload);
+    } else if ("raw" in payload && payload.raw?.execution?.data) {
       this.bytes = hexToUint8Array(payload.raw.execution.data);
-      return;
-    }
-
-    if ("response" in payload && typeof payload.response?.data === "bigint") {
-      this.bytes = bigintToBytesLE(payload.response.data, 16);
-      return;
-    }
-
-    if ("response" in payload && typeof payload.response?.data === "string") {
+    } else if (
+      "response" in payload &&
+      typeof payload.response?.data === "bigint"
+    ) {
+      this.bytes = bigintToLE(payload.response.data);
+    } else if (
+      "response" in payload &&
+      typeof payload.response?.data === "string"
+    ) {
       this.bytes = hexToUint8Array(payload.response.data);
-      return;
+    } else {
+      throw new Error("DecodableAlkanesResponse: unsupported payload shape");
     }
-
-    throw new Error("DecodableAlkanesResponse: unsupported payload shape");
   }
 
-  toString(): string {
-    return new TextDecoder().decode(this.bytes);
+  /*----------------------------------------------------------*
+   | per-instance decoder table                               |
+   *----------------------------------------------------------*/
+  private decoderTable(): DecoderFns<T> {
+    const base: Omit<DecoderFns<T>, "object"> = {
+      string: (buf) => new TextDecoder().decode(buf),
+
+      boolean: (buf) => {
+        if (!buf.length) throw new Error("Empty buffer → boolean");
+        return buf[0] !== 0;
+      },
+
+      bigint: leBytesToBigint,
+
+      hex: (buf) =>
+        Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join(""),
+
+      uint8Array: (buf) => buf,
+
+      bigintArray: (buf) => {
+        const out: bigint[] = [];
+        for (let i = 0; i < buf.length; i += 16) {
+          out.push(leBytesToBigint(buf.subarray(i, i + 16)));
+        }
+        return out;
+      },
+
+      /** fixed-8 token ⇒ number */
+      tokenValue: (buf) => {
+        const raw = leBytesToBigint(buf); // e.g. satoshis
+        const whole = raw / 100_000_000n;
+        const frac = raw % 100_000_000n;
+        return Number(whole) + Number(frac) / 1e8;
+      },
+    };
+
+    return {
+      ...base,
+      object: (buf) => {
+        if (!this.borshSchema) {
+          throw new Error("decodeTo('object') needs a Borsh schema");
+        }
+        return borshDeserialize(this.borshSchema, buf);
+      },
+    };
   }
 
-  toStringArray(delimiter: string | RegExp = "\0"): string[] {
-    const text = this.toString();
-    const parts = text.split(delimiter).filter(Boolean);
-    return parts;
-  }
-
-  toBoolean(): boolean {
-    if (this.bytes.length === 0) {
-      throw new Error("Cannot decode empty buffer as boolean");
-    }
-    return this.bytes[0] !== 0;
-  }
-
-  toBigInt(): bigint {
-    let value = 0n;
-    for (let i = 0; i < this.bytes.length; i++) {
-      value |= BigInt(this.bytes[i]) << (8n * BigInt(i));
-    }
-    return value;
-  }
-
-  toTokenValue(decimals: number): number {
-    const value = this.toBigInt();
-    let wholeValue = value / BigInt(10 ** decimals);
-    let fractionalValue = value % BigInt(10 ** decimals);
-
-    return Number(wholeValue) + Number(fractionalValue) / 10 ** decimals;
-  }
-
-  toBigIntArray(): bigint[] {
-    const out: bigint[] = [];
-    for (let offset = 0; offset < this.bytes.length; offset += 16) {
-      const chunk = this.bytes.subarray(offset, offset + 16);
-      out.push(DecodableAlkanesResponse.leBytesToBigInt(chunk));
-    }
-    return out;
-  }
-
-  private static leBytesToBigInt(bytes: Uint8Array): bigint {
-    let v = 0n;
-    for (let i = 0; i < bytes.length; i++) {
-      v |= BigInt(bytes[i]) << (8n * BigInt(i));
-    }
-    return v;
-  }
-
-  toUint8Array(): Uint8Array {
-    return this.bytes;
-  }
-
-  toHex(): string {
-    return Array.from(this.bytes)
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("");
-  }
-
-  toObject(): T {
-    if (!this.borshSchema) {
-      throw new Error("Borsh deserialization function not provided");
-    }
-    return borshDeserialize(this.borshSchema, this.bytes);
+  /*----------------------------------------------------------*
+   | PUBLIC  decodeTo                                         |
+   *----------------------------------------------------------*/
+  decodeTo<K extends AvailableDecodeKind>(
+    kind: K
+  ): ReturnType<DecoderFns<T>[K]> {
+    const tbl = this.decoderTable() as DecoderFns<T>;
+    // the cast is safe –  key is constrained by K
+    return tbl[kind](this.bytes) as ReturnType<DecoderFns<T>[K]>;
   }
 }
 
-export type IDecodableAlkanesResponse<T> = Expand<DecodableAlkanesResponse<T>>;
+/* convenience alias for users that imported the old name */
+export type IDecodableAlkanesResponse<T> = DecodableAlkanesResponse<T>;

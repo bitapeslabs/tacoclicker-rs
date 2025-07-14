@@ -1,41 +1,19 @@
+/*─────────────────────────────────────────────────────────────
+  ENCODABLE  – single `encodeTo` API (symmetrical with decodeTo)
+──────────────────────────────────────────────────────────────*/
 import { BoxedResponse, BoxedSuccess, BoxedError } from "@/boxed";
-import { Expand } from "@/utils";
 import { borshSerialize, BorshSchema } from "borsher";
-function encodeStringToU128Array(str: string): bigint[] {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(str);
+import { Expand } from "@/utils";
 
-  const u128s: bigint[] = [];
+/*------------------------------------------------------------*
+ | 1.  low-level helpers                                       |
+ *------------------------------------------------------------*/
+function encodeStringToU128Array(text: string): bigint[] {
+  const bytes = new TextEncoder().encode(text);
+  const out: bigint[] = [];
 
-  for (let offset = 0; offset < data.length; offset += 16) {
-    // Take a 16-byte window (slice shorter at EOF)
-    const chunk = data.subarray(offset, offset + 16);
-
-    // Pad to 16 bytes on the right with zeros
-    const buf = new Uint8Array(16);
-    buf.set(chunk);
-
-    // Convert little-endian bytes -> BigInt
-    let n = 0n;
-    for (let i = 0; i < 16; i++) {
-      n |= BigInt(buf[i]) << (8n * BigInt(i)); // 256-base place value
-    }
-
-    u128s.push(n);
-  }
-
-  return u128s;
-}
-
-function encodeUintArrayToU128Array(data: Uint8Array | number[]): bigint[] {
-  const bytes = data instanceof Uint8Array ? data : Uint8Array.from(data);
-
-  const u128s: bigint[] = [];
-
-  for (let offset = 0; offset < bytes.length; offset += 16) {
-    const chunk = bytes.subarray(offset, offset + 16);
-
-    // Zero-pad to a full 16-byte buffer
+  for (let off = 0; off < bytes.length; off += 16) {
+    const chunk = bytes.subarray(off, off + 16);
     const buf = new Uint8Array(16);
     buf.set(chunk);
 
@@ -43,90 +21,125 @@ function encodeUintArrayToU128Array(data: Uint8Array | number[]): bigint[] {
     for (let i = 0; i < 16; i++) {
       word |= BigInt(buf[i]) << (8n * BigInt(i));
     }
-
-    u128s.push(word);
+    out.push(word);
   }
-
-  return u128s;
+  return out;
 }
 
-enum EncodeError {
+function encodeBytesToU128Array(data: Uint8Array): bigint[] {
+  const out: bigint[] = [];
+  for (let off = 0; off < data.length; off += 16) {
+    const buf = new Uint8Array(16);
+    buf.set(data.subarray(off, off + 16));
+
+    let word = 0n;
+    for (let i = 0; i < 16; i++) {
+      word |= BigInt(buf[i]) << (8n * BigInt(i));
+    }
+    out.push(word);
+  }
+  return out;
+}
+
+/*------------------------------------------------------------*
+ | 2.  error enum                                              |
+ *------------------------------------------------------------*/
+export enum EncodeError {
   InvalidPayload = "Invalid payload type",
+  NameTooLong = "Name payload exceeds 2 × u128",
+  CharTooLong = "Char payload exceeds 1 × u128",
+  BorshMissing = "Borsh schema is required for object serialization",
 }
 
-export class Encodable<T> {
-  public readonly payload: unknown;
-  public readonly borshSchema?: BorshSchema<T>;
+/*------------------------------------------------------------*
+ | 3.  encode-kind table                                       |
+ *------------------------------------------------------------*/
+interface EncoderFns<Obj> {
+  string: (data: unknown) => BoxedResponse<bigint[], EncodeError>;
+  name: (data: unknown) => BoxedResponse<bigint[], EncodeError>;
+  char: (data: unknown) => BoxedResponse<bigint[], EncodeError>;
+  object: (
+    data: unknown,
+    schema?: BorshSchema<Obj>
+  ) => BoxedResponse<bigint[], EncodeError>;
+}
 
-  constructor(payload: unknown, borshSchema?: BorshSchema<T>) {
-    this.payload = payload;
-    this.borshSchema = borshSchema;
+export type AvailableEncodeKind = keyof EncoderFns<unknown>; // "string" | …
+
+/*------------------------------------------------------------*
+ | 4.  Encodable <T> with a *single* `encodeTo` method          |
+ *------------------------------------------------------------*/
+export class Encodable<T = unknown> {
+  constructor(
+    public readonly payload: unknown,
+    private readonly borshSchema?: BorshSchema<T>
+  ) {}
+
+  /* per-instance encoder table */
+  private encoderTable(): EncoderFns<T> {
+    return {
+      /*----------------------------------------------------*/
+      string: (data) => {
+        if (typeof data !== "string") {
+          return new BoxedError(
+            EncodeError.InvalidPayload,
+            "Payload must be a string"
+          );
+        }
+        return new BoxedSuccess(encodeStringToU128Array(data));
+      },
+
+      /*----------------------------------------------------*/
+      name: (data) => {
+        if (typeof data !== "string") {
+          return new BoxedError(
+            EncodeError.InvalidPayload,
+            "Payload must be a string"
+          );
+        }
+        const arr = encodeStringToU128Array(data);
+        if (arr.length > 2) return new BoxedError(EncodeError.NameTooLong);
+        if (arr.length === 1) arr.push(0n); // right-pad
+        return new BoxedSuccess(arr);
+      },
+
+      /*----------------------------------------------------*/
+      char: (data) => {
+        if (typeof data !== "string") {
+          return new BoxedError(
+            EncodeError.InvalidPayload,
+            "Payload must be a string"
+          );
+        }
+        const arr = encodeStringToU128Array(data);
+        if (arr.length > 1) return new BoxedError(EncodeError.CharTooLong);
+        return new BoxedSuccess(arr);
+      },
+
+      /*----------------------------------------------------*/
+      object: (data, schema) => {
+        if (!schema) {
+          return new BoxedError(
+            EncodeError.BorshMissing,
+            "Missing Borsh schema"
+          );
+        }
+        const bytes = borshSerialize(schema, data);
+        return new BoxedSuccess(encodeBytesToU128Array(bytes));
+      },
+    };
   }
 
-  fromString(): BoxedResponse<bigint[], EncodeError> {
-    if (typeof this.payload !== "string") {
-      return new BoxedError(
-        EncodeError.InvalidPayload,
-        "Payload must be a string"
-      );
-    }
-    return new BoxedSuccess(encodeStringToU128Array(this.payload));
-  }
-
-  fromName(): BoxedResponse<bigint[], EncodeError> {
-    if (typeof this.payload !== "string") {
-      return new BoxedError(
-        EncodeError.InvalidPayload,
-        "Payload must be a string"
-      );
-    }
-    let result = encodeStringToU128Array(this.payload);
-
-    if (result.length > 2) {
-      return new BoxedError(
-        EncodeError.InvalidPayload,
-        "Payload must be a name (max 2 u128s)"
-      );
-    }
-
-    if (result.length === 1) {
-      result.push(0n); // pad with zero if only one u128
-    }
-    return new BoxedSuccess(result);
-  }
-
-  fromChar(): BoxedResponse<bigint[], EncodeError> {
-    if (typeof this.payload !== "string") {
-      return new BoxedError(
-        EncodeError.InvalidPayload,
-        "Payload must be a string"
-      );
-    }
-
-    let result = encodeStringToU128Array(this.payload);
-
-    if (result.length > 1) {
-      return new BoxedError(
-        EncodeError.InvalidPayload,
-        "Payload must be a single character (max 1 u128)"
-      );
-    }
-
-    return new BoxedSuccess(result);
-  }
-
-  fromObject(): BoxedResponse<bigint[], EncodeError> {
-    if (!this.borshSchema) {
-      return new BoxedError(
-        EncodeError.InvalidPayload,
-        "Borsh schema is required for object serialization"
-      );
-    }
-
-    return new BoxedSuccess(
-      encodeUintArrayToU128Array(borshSerialize(this.borshSchema, this.payload))
-    );
+  /* public façade – **one** method like decodeTo ------------------*/
+  encodeTo<K extends AvailableEncodeKind>(
+    kind: K
+  ): ReturnType<EncoderFns<T>[K]> {
+    // satisfy TS: we know the key exists
+    const tbl = this.encoderTable() as EncoderFns<T>;
+    // @ts-expect-error – runtime check handled in each encoder
+    return tbl[kind](this.payload, this.borshSchema);
   }
 }
 
-export type IEncodable = Expand<(typeof Encodable)["prototype"]>;
+/* convenience alias (mirrors IDecodableAlkanesResponse) */
+export type IEncodable<T> = Expand<Encodable<T>>;
