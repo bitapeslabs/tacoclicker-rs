@@ -11,7 +11,10 @@ import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
 import { createHash } from "crypto";
 import { IAccount } from "@/libs/alkanes/account/types";
 import { EncryptedMnemonic, WalletSigner, DecryptedWallet } from "./types";
+import { ECPairInterface, ECPairFactory } from "ecpair";
+
 export const bip32 = BIP32Factory(ecc);
+export const ECPair = ECPairFactory(ecc);
 
 export function getSigner(mnemonic: string): WalletSigner {
   const seed = bip39.mnemonicToSeedSync(mnemonic);
@@ -162,10 +165,22 @@ export const getTaprootWalletSigner = (): DecryptedWallet => {
 type BrowserLikeWalletSigner = {
   oyl: IAccount;
   signer: WalletSigner;
+  ecsigner: ECPairInterface;
   signPsbt: (unsignedPsbtBase64: string) => Promise<string>;
   address: string;
 };
+export function ecPairFromWalletSigner(
+  signer: WalletSigner,
+  network: bitcoin.networks.Network = bitcoin.networks.bitcoin
+): ECPairInterface {
+  if (!signer.xprv.privateKey) {
+    throw new Error("xprv does not contain a private key");
+  }
 
+  return ECPair.fromPrivateKey(Buffer.from(signer.xprv.privateKey), {
+    network,
+  });
+}
 export async function signPsbt(
   base64Psbt: string,
   walletSigner: WalletSigner
@@ -181,7 +196,10 @@ export async function signPsbt(
       const input = psbt.data.inputs[i];
 
       // Skip inputs already finalized (have finalScriptWitness or finalScriptSig)
-      if (input.finalScriptWitness || input.finalScriptSig) continue;
+      if (input.finalScriptWitness || input.finalScriptSig) {
+        console.log(`Input ${i} already finalized, skipping...`);
+        continue;
+      }
 
       psbt.signInput(i, signer);
       psbt.finalizeInput(i);
@@ -199,6 +217,7 @@ const taprootDecryptedWallet = getTaprootWalletSigner();
 export const walletSigner: BrowserLikeWalletSigner = {
   oyl: getOylAccountFromSigner(taprootDecryptedWallet.signer, provider),
   signer: taprootDecryptedWallet.signer,
+  ecsigner: ecPairFromWalletSigner(taprootDecryptedWallet.signer),
   signPsbt: (unsignedPsbtBase64: string) =>
     signPsbt(unsignedPsbtBase64, taprootDecryptedWallet.signer),
   address: getCurrentTaprootAddress(taprootDecryptedWallet.signer),

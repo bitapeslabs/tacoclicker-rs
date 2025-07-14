@@ -16,16 +16,14 @@ const INSCRIPTION_SCHEMA = BorshSchema.Struct({
   message: BorshSchema.String,
 });
 
-const finalizeSignedPsbt = (signedBase64: string): string => {
-  console.log(signedBase64);
-  const psbt = Psbt.fromBase64(signedBase64, { network: provider.network });
-  psbt.finalizeAllInputs();
-  return psbt.extractTransaction().toHex();
-};
-
 async function broadcastRawTransaction(txHex: string): Promise<string> {
-  const response = await provider.rpc.electrum.esplora_broadcastTx(txHex);
-  return consumeOrThrow(response); // unwrap BoxedResponse
+  const response = consumeOrThrow(
+    await provider.rpc.electrum.esplora_broadcastTx(txHex)
+  );
+  logger.info(
+    `Broadcasted transaction: ${provider.explorerUrl}/tx/${response}`
+  );
+  return response;
 }
 
 export const runCommitRevealInscriptionTest = async (): Promise<boolean> => {
@@ -58,8 +56,6 @@ export const runCommitRevealInscriptionTest = async (): Promise<boolean> => {
     const revealPsbt = await wrapper.buildReveal();
 
     const revealSignedTx = await walletSigner.signPsbt(revealPsbt.toBase64());
-
-    console.log("reveal tx: " + revealSignedTx);
 
     spinner.succeed("Done. Submitting transactions…");
 

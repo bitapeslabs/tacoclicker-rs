@@ -3,6 +3,7 @@ import { runSandbox } from "./sandbox";
 import { runFreeMint } from "./freemint";
 import { runGetAddressDetails } from "./address";
 import { runCommitRevealInscriptionTest } from "./testinscription";
+import { runGeneralTest } from "./tests";
 export const commands = {
   //Deploys, inspects and asserts tests freemint.wasm
   "--freemint": runFreeMint,
@@ -10,4 +11,5 @@ export const commands = {
   "--sandbox": runSandbox,
   "--address": runGetAddressDetails,
   "--testinscription": runCommitRevealInscriptionTest,
+  "--test": runGeneralTest,
 };

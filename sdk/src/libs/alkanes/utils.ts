@@ -14,7 +14,8 @@ import {
   IEsploraVout,
 } from "@/apis";
 import { ecc } from "@/crypto/ecc";
-import ECPairFactory from "ecpair";
+import ECPairFactory, { ECPairInterface } from "ecpair";
+import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
 
 export const EcPair = ECPairFactory(ecc);
 type BasePsbtParams = {
@@ -557,11 +558,13 @@ export const assertHex = (pubKey: Buffer) =>
   pubKey.length === 32 ? pubKey : pubKey.slice(1, 33);
 
 export function tweakSigner(
-  signer: bitcoin.Signer,
-  opts: any = {}
+  signer: ECPairInterface,
+  opts: {
+    network: bitcoin.Network;
+    tweakHash?: Buffer;
+  }
 ): bitcoin.Signer {
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
   let privateKey: Uint8Array | undefined = signer.privateKey!;
   if (!privateKey) {
     throw new Error("Private key required");
@@ -581,4 +584,91 @@ export function tweakSigner(
   return EcPair.fromPrivateKey(Buffer.from(tweakedPrivateKey), {
     network: opts.network,
   });
+}
+
+export const getVSize = (data: Buffer) => {
+  let totalSize = data.length;
+  if (totalSize < 0xfd) {
+    totalSize += 1;
+  } else if (totalSize <= 0xffff) {
+    totalSize += 3;
+  } else if (totalSize <= 0xffffffff) {
+    totalSize += 5;
+  }
+  return Math.ceil(totalSize / 4);
+};
+export const formatInputsToSign = ({
+  _psbt,
+  senderPublicKey,
+  network,
+}: {
+  _psbt: bitcoin.Psbt;
+  senderPublicKey: string;
+  network: bitcoin.Network;
+}) => {
+  let index = 0;
+  for (const v of _psbt.data.inputs) {
+    const isSigned = v.finalScriptSig || v.finalScriptWitness;
+    const lostInternalPubkey = !v.tapInternalKey;
+    if (!isSigned || lostInternalPubkey) {
+      const tapInternalKey = toXOnly(Buffer.from(senderPublicKey, "hex"));
+      const p2tr = bitcoin.payments.p2tr({
+        internalPubkey: tapInternalKey,
+        network: network,
+      });
+      if (
+        v.witnessUtxo?.script.toString("hex") === p2tr.output?.toString("hex")
+      ) {
+        v.tapInternalKey = tapInternalKey;
+      }
+    }
+    index++;
+  }
+
+  return _psbt;
+};
+
+export const toFormattedUtxo = (
+  esploraTx: IEsploraTransaction,
+  hex: string,
+  address: string,
+  vout: number
+): FormattedUtxo => ({
+  txId: esploraTx.txid,
+  outputIndex: vout,
+  satoshis: esploraTx.vout[vout].value,
+  scriptPk: esploraTx.vout[vout].scriptpubkey,
+  prevTx: esploraTx,
+  prevTxHex: hex,
+  inscriptions: [],
+  runes: {},
+  address: address,
+  confirmations: 1,
+  indexed: true,
+  alkanes: {},
+});
+function compactSize(n: number): Buffer {
+  if (n < 0xfd) return Buffer.of(n);
+  if (n <= 0xffff) return Buffer.of(0xfd, n & 0xff, n >> 8);
+  if (n <= 0xffffffff)
+    return Buffer.of(
+      0xfe,
+      n & 0xff,
+      (n >> 8) & 0xff,
+      (n >> 16) & 0xff,
+      (n >> 24) & 0xff
+    );
+  /* >4 GiB should never happen for a TapLeaf */
+  throw new RangeError("script too large");
+}
+function tapleafHash(
+  leafVersion: number, // 0xc0 for tapscript
+  script: Buffer // full tapscript
+): Buffer {
+  const preimage = Buffer.concat([
+    Buffer.of(leafVersion),
+    compactSize(script.length),
+    script,
+  ]);
+  return bitcoin.crypto.taggedHash("TapLeaf", preimage);
 }

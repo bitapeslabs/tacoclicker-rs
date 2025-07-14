@@ -23,6 +23,7 @@ import {
 } from "../decoders";
 import { Expand } from "@/utils";
 import { BorshSchema } from "borsher";
+import { abi, Schema, ResolveSchema } from "./builder"; // 🠕
 
 export enum AlkanesSimulationError {
   UnknownError = "UnknownError",
@@ -113,4 +114,55 @@ export abstract class AlkanesBaseContract {
       );
     }
   };
+
+  protected async handleView<I extends Schema, O extends Schema>(
+    opcode: bigint,
+    arg: ResolveSchema<I>,
+    outShape: O // may or may not be a BorshSchema
+  ): Promise<BoxedResponse<ResolveSchema<O>, AlkanesSimulationError>> {
+    console.log("params passed in:");
+    console.log(opcode, arg, outShape);
+
+    const callData = [opcode];
+    const raw = consumeOrThrow(await this.simulate({ callData }));
+
+    const maybeSchema =
+      outShape instanceof BorshSchema
+        ? (outShape as BorshSchema<ResolveSchema<O>>)
+        : undefined;
+
+    //return new BoxedSuccess(
+    //new DecodableAlkanesResponse(raw, maybeSchema).toObject()
+    //);
+
+    return "" as any; // TODO: implement this
+  }
+
+  /*──────────────────────────────────────────────────────────*
+   | Execute helper                                           |
+   *──────────────────────────────────────────────────────────*/
+  protected handleExecute<I extends Schema, O extends Schema>(
+    address: string,
+    opcode: bigint,
+    arg: ResolveSchema<I>,
+    outShape: O,
+    asInscription: boolean
+  ): Promise<
+    BoxedResponse<
+      AlkanesPushExecuteResponse<ResolveSchema<O>>,
+      AlkanesExecuteError
+    >
+  > {
+    console.log("params passed in:");
+    console.log(address, opcode, arg, outShape, asInscription);
+    const config = {
+      address,
+      callData: [opcode], // TODO encode `arg`
+    };
+
+    const maybeSchema = outShape instanceof BorshSchema ? outShape : undefined;
+
+    //return this.pushExecute(config, maybeSchema);
+    return "" as any;
+  }
 }

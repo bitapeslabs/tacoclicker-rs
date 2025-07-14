@@ -11,7 +11,8 @@
     "freemint": "node esbuild.config.mjs && node dist/index.js --freemint",
     "sandbox": "node esbuild.config.mjs && node dist/index.js --sandbox",
     "address": "node esbuild.config.mjs && node dist/index.js --address",
-    "testinscription": "node esbuild.config.mjs && node dist/index.js --testinscription"
+    "testinscription": "node esbuild.config.mjs && node dist/index.js --testinscription",
+    "test": "node esbuild.config.mjs && node dist/index.js --test"
   },
   "dependencies": {
     "@magiceden-oss/runestone-lib": "^1.0.2",

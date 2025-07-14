@@ -6,13 +6,19 @@ import {
   networks,
   payments,
   script,
+  crypto,
 } from "bitcoinjs-lib";
 import { toXOnly } from "bitcoinjs-lib/src/psbt/bip371";
 import { ECPairFactory, ECPairInterface } from "ecpair";
 import { LEAF_VERSION_TAPSCRIPT } from "bitcoinjs-lib/src/payments/bip341";
-
+import { tapleafHash } from "bitcoinjs-lib/src/payments/bip341";
 import { randomBytes } from "crypto";
-import { witnessStackToScriptWitness } from "./utils";
+import {
+  formatInputsToSign,
+  getVSize,
+  toFormattedUtxo,
+  witnessStackToScriptWitness,
+} from "./utils";
 import { extractWithDummySigs, toEsploraTx } from "./utils";
 
 import type {
@@ -42,8 +48,16 @@ import { consumeOrThrow } from "@/boxed";
 import { u128, u32 } from "@magiceden-oss/runestone-lib/dist/src/integer";
 import { BorshSchema } from "borsher";
 import { EcPair } from "./utils";
+import { Expand } from "@/utils";
 
 type PsbtInputExtended = Parameters<Psbt["addInput"]>[0];
+
+type LeafHashInputs = Expand<Parameters<typeof tapleafHash>[0]>;
+
+type IncludeInputOption = {
+  input_extended: PsbtInputExtended;
+  input_formatted: FormattedUtxo;
+};
 
 type IEdict = NonNullable<ProtoStone["edicts"]>[number];
 
@@ -78,6 +92,10 @@ export class ProtostoneTransactionWithInscription<T> {
   private tweakedDummySigner: Signer;
   private tweakedPublicKey: string;
   private revealPsbt?: Psbt;
+  private inscriptionBytes: Uint8Array;
+  private baseSigner: ECPairInterface;
+  private signedCommitTx: Transaction | null = null;
+  private signedCommitEsploraTx: IEsploraTransaction | null = null;
   private utxoTweak: IAvailableUtxoTweakOptions = {
     remove: new Set(),
     add: [],
@@ -88,12 +106,19 @@ export class ProtostoneTransactionWithInscription<T> {
     private readonly inscription: AlkanesInscription<T>,
     private readonly opts: ProtostoneTransactionOptions
   ) {
-    this.tweakedDummySigner = tweakSigner(
-      EcPair.makeRandom({
-        network: this.opts.provider.network,
-      })
-    );
+    this.baseSigner = EcPair.makeRandom({
+      network: this.opts.provider.network,
+    });
+
+    this.tweakedDummySigner = tweakSigner(this.baseSigner, {
+      network: this.opts.provider.network,
+    });
+
     this.tweakedPublicKey = this.tweakedDummySigner.publicKey.toString("hex");
+
+    this.inscriptionBytes = new Uint8Array(
+      borshSerialize(this.inscription.borshSchema, this.inscription.shape)
+    );
   }
 
   public async buildCommit(): Promise<Psbt> {
@@ -101,7 +126,10 @@ export class ProtostoneTransactionWithInscription<T> {
 
     const commitTransfer: SingularBTCTransfer = {
       asset: "btc",
-      amount: 546,
+      amount:
+        546 +
+        getVSize(Buffer.from(this.inscriptionBytes!)) *
+          (this.opts.feeRate ?? this.opts.provider.defaultFeeRate),
       address: this.taprootAddress(),
     };
     const guessBuilder = new ProtostoneTransaction(this.changeAddress, {
@@ -131,27 +159,23 @@ export class ProtostoneTransactionWithInscription<T> {
 
   public finalizeCommit(txHex: string) {
     const tx = Transaction.fromHex(txHex);
-    let txEsplora = toEsploraTx(tx);
+    this.signedCommitTx = tx;
+
+    this.signedCommitEsploraTx = toEsploraTx(tx);
 
     //Make sure we arent using these utxos in the building of reveal
-    txEsplora.vin.forEach((input, index) => {
+    this.signedCommitEsploraTx.vin.forEach((input, index) => {
       this.utxoTweak.remove!.add(`${input.txid}:${input.vout}`);
     });
     tx.outs.forEach((output, index) => {
-      this.utxoTweak.add.push({
-        txId: tx.getId(),
-        outputIndex: index,
-        satoshis: output.value,
-        scriptPk: output.script.toString("hex"),
-        prevTx: txEsplora,
-        prevTxHex: txHex,
-        inscriptions: [],
-        runes: {},
-        address: this.changeAddress,
-        confirmations: 1,
-        indexed: true,
-        alkanes: {},
-      });
+      this.utxoTweak.add.push(
+        toFormattedUtxo(
+          this.signedCommitEsploraTx!,
+          txHex,
+          this.changeAddress,
+          index
+        )
+      );
     });
   }
 
@@ -159,6 +183,25 @@ export class ProtostoneTransactionWithInscription<T> {
     if (this.revealPsbt) return this.revealPsbt;
 
     const p2pk_redeem = { output: this.script };
+    const expectedScriptPk = payments
+      .p2tr({
+        internalPubkey: toXOnly(Buffer.from(this.tweakedPublicKey, "hex")),
+        scriptTree: { output: this.script },
+        network: this.opts.provider.network,
+      })
+      .output!.toString("hex");
+
+    const commitUtxo = this.utxoTweak.add.find(
+      (u) =>
+        u.txId === this.signedCommitTx!.getId() &&
+        u.scriptPk === expectedScriptPk
+    );
+
+    if (!commitUtxo) {
+      throw new Error(
+        `Commit UTXO not found in utxoTweak. Expected scriptPk: ${expectedScriptPk}`
+      );
+    }
 
     const { output, witness } = payments.p2tr({
       internalPubkey: toXOnly(Buffer.from(this.tweakedPublicKey, "hex")),
@@ -168,10 +211,10 @@ export class ProtostoneTransactionWithInscription<T> {
     });
 
     let commitTxInput: PsbtInputExtended = {
-      hash: this.utxoTweak.add[0].txId,
-      index: 0,
+      hash: commitUtxo.txId,
+      index: commitUtxo.outputIndex,
       witnessUtxo: {
-        value: this.utxoTweak.add[0].satoshis,
+        value: commitUtxo.satoshis,
         script: output ?? Buffer.from(""),
       },
       tapLeafScript: [
@@ -183,25 +226,41 @@ export class ProtostoneTransactionWithInscription<T> {
       ],
     };
 
+    let commitTxInputOption = {
+      input_extended: commitTxInput,
+      input_formatted: toFormattedUtxo(
+        this.signedCommitEsploraTx!,
+        this.signedCommitTx!.toHex(),
+        this.changeAddress,
+        commitTxInput.index
+      ),
+    };
+
     const dry = await getDummyProtostoneTransaction(this.changeAddress, {
       ...this.opts,
-      includeInputs: [commitTxInput],
+      includeInputs: [commitTxInputOption],
       availableUtxoTweak: this.utxoTweak,
     });
     if (isBoxedError(dry)) throw new Error(dry.message);
 
     this.revealBuilder = new ProtostoneTransaction(this.changeAddress, {
       ...this.opts,
-      includeInputs: [commitTxInput],
+      includeInputs: [commitTxInputOption],
       availableUtxoTweak: this.utxoTweak,
       feeOpts: dry.data.feeOpts,
     });
     await this.revealBuilder.build();
     this.revealPsbt = this.revealBuilder.getPsbt();
 
-    this.revealPsbt.signInput(0, this.tweakedDummySigner);
-    this.revealPsbt.finalizeInput(0);
-    return this.revealPsbt;
+    const formattedPsbt = formatInputsToSign({
+      _psbt: this.revealPsbt,
+      senderPublicKey: this.baseSigner.publicKey.toString("hex"),
+      network: this.opts.provider.network,
+    });
+
+    formattedPsbt.signInput(0, this.tweakedDummySigner);
+    formattedPsbt.finalizeInput(0);
+    return formattedPsbt;
   }
 
   public extractPsbts(): [string, string] {
@@ -211,21 +270,19 @@ export class ProtostoneTransactionWithInscription<T> {
   }
 
   private taprootAddress(): string {
-    const bytes = new Uint8Array(
-      borshSerialize(this.inscription.borshSchema, this.inscription.shape)
-    );
+    let xOnlyPubkey = toXOnly(Buffer.from(this.tweakedPublicKey, "hex"));
 
     const script = Buffer.from(
-      p2tr_ord_reveal(toXOnly(Buffer.from(this.tweakedPublicKey, "hex")), [
+      p2tr_ord_reveal(xOnlyPubkey, [
         {
-          body: bytes,
+          body: this.inscriptionBytes,
           cursed: false,
           tags: { contentType: "" },
         },
       ]).script
     );
     const inscriberInfo = payments.p2tr({
-      internalPubkey: toXOnly(Buffer.from(this.tweakedPublicKey, "hex")),
+      internalPubkey: xOnlyPubkey,
       scriptTree: {
         output: script,
       },
@@ -285,7 +342,7 @@ export class ProtostoneTransaction {
     /*
       useful for reveals on inscriptions
     */
-    includeInputs?: PsbtInputExtended[];
+    includeInputs?: IncludeInputOption[];
 
     includePsbts?: string[];
     /*
@@ -499,6 +556,18 @@ export class ProtostoneTransaction {
 
     //Add all alkanes utxos to the utxosToMeetRequirements
     let accumulated = 0;
+
+    for (const input of this.transactionOptions.includeInputs ?? []) {
+      const utxoId = `${input.input_formatted.txId}:${input.input_formatted.outputIndex}`;
+      utxosToMeetRequirementsSet.set(
+        utxoId,
+
+        //This doesnt matter because the adddynamicinput function will never read this as a check before it handles and removes it from the set
+        input.input_formatted
+      );
+      accumulated += input.input_formatted.satoshis;
+    }
+
     for (const alkanesUtxo of alkanesUtxos) {
       const utxoId = `${alkanesUtxo.txId}:${alkanesUtxo.outputIndex}`;
       if (alkanesUtxo.prevTx === null) {
@@ -632,11 +701,19 @@ export class ProtostoneTransaction {
   }
 
   private addInputs(): void {
+    const addedInputs = new Set<string>();
     for (const input of this.transactionOptions.includeInputs ?? []) {
-      this.psbt.addInput(input);
+      this.psbt.addInput(input.input_extended);
+      addedInputs.add(
+        `${input.input_formatted.txId}:${input.input_formatted.outputIndex}`
+      );
     }
 
     for (const utxo of this.utxos) {
+      if (addedInputs.has(`${utxo.txId}:${utxo.outputIndex}`)) {
+        continue; // Skip if already added
+      }
+
       this.addInputDynamic(utxo);
     }
   }
