@@ -12,17 +12,10 @@
  | 0. Imports & shared types                                   |
  *------------------------------------------------------------*/
 import { BorshSchema, Infer as BorshInfer } from "borsher";
-import {
-  AlkanesBaseContract,
-  AlkanesSimulationError,
-  OpcodeTable,
-} from "./base";
+import { AlkanesBaseContract, AlkanesPushExecuteResponse, AlkanesSimulationError, OpcodeTable } from "./base";
 import { IDecodableAlkanesResponse } from "../decoders";
 import { AvailableDecodeKind as DecKind } from "../decoders";
-import {
-  AvailableEncodeKind,
-  AvailableEncodeKind as EncKind,
-} from "../encoders";
+import { AvailableEncodeKind, AvailableEncodeKind as EncKind } from "../encoders";
 import { AlkanesExecuteError } from "../alkanes";
 import { BoxedResponse } from "@/boxed";
 
@@ -34,9 +27,11 @@ type VoidEnc = typeof VOID_ENC;
 
 /** Encode‑kind augmented with a sentinel for “no args”. */
 type Enc = EncKind | VoidEnc;
+type Dec = Exclude<DecKind, "object"> | BorshSchema<any> | ArraySchema<any> | ObjectSchema<any>;
+
 type ICustomOpts = Partial<{
   input: Enc; // input kind
-  output: DecKind; // output kind
+  output: Dec; // output kind
   asInscription: boolean; // inscription flag
 }>;
 /*------------------------------------------------------------*
@@ -50,11 +45,7 @@ interface ObjectSchema<F extends Record<string, Schema>> {
   kind: "object";
   fields: F;
 }
-export type Schema =
-  | Enc
-  | BorshSchema<any>
-  | ArraySchema<any>
-  | ObjectSchema<any>;
+export type Schema = Enc | BorshSchema<any> | ArraySchema<any> | ObjectSchema<any>;
 
 export type ResolveSchema<S> = S extends VoidEnc
   ? never // “no arg” maps to never so callers can omit it
@@ -79,10 +70,11 @@ export type ResolveSchema<S> = S extends VoidEnc
  *------------------------------------------------------------*/
 const VIEW_TAG = Symbol("view");
 const EXEC_TAG = Symbol("execute");
+const CUSTOM_TAG = Symbol("custom");
 
 type AnyImpl = (...args: any[]) => any;
 
-export interface ViewSpec<I extends Enc = Enc, O extends DecKind = DecKind> {
+export interface ViewSpec<I extends Schema = Schema, O extends Dec = Dec> {
   _t: typeof VIEW_TAG;
   opcode: bigint;
   input: I;
@@ -90,27 +82,36 @@ export interface ViewSpec<I extends Enc = Enc, O extends DecKind = DecKind> {
   impl?: (this: AlkanesBaseContract, arg: ResolveSchema<I>) => any;
 }
 
-export interface ExecuteSpec<I extends Enc = Enc, O extends DecKind = DecKind> {
+export interface ExecuteSpec<I extends Schema = Schema, O extends Dec = Dec> {
   _t: typeof EXEC_TAG;
   opcode: bigint;
   input: I;
   output: O;
   asInscription: boolean;
-  impl?: (
-    this: AlkanesBaseContract,
-    address: string,
-    arg: ResolveSchema<I>,
-    asInscription: boolean
-  ) => any;
+  impl?: (this: AlkanesBaseContract, address: string, arg: ResolveSchema<I>, asInscription: boolean) => any;
 }
 
-type AnySpec = ViewSpec<any, any> | ExecuteSpec<any, any>;
+type CustomImpl<P> = (this: AlkanesBaseContract, opcode: bigint, params: P) => any; // leave this broad, we’ll capture the full signature in the spec
+
+export interface CustomSpec<
+  I, // the “decoded param” type
+  O, // the decode‐kind
+  Impl extends CustomImpl<I>, // the actual function type
+> {
+  _t: typeof CUSTOM_TAG;
+  opcode: bigint;
+  input: I;
+  output: O;
+  impl: Impl; // ← now preserves both param‐type _and_ return‐type
+}
+
+type AnySpec = ViewSpec<any, any> | ExecuteSpec<any, any> | CustomSpec<any, any, any>;
 
 /*------------------------------------------------------------*
  | 4.  Builder helpers                                         |
  *------------------------------------------------------------*/
-const createViewBuilder = <I extends Enc>(opcode: bigint, input: I) => ({
-  returns: <O extends DecKind>(output: O): ViewSpec<I, O> => ({
+const createViewBuilder = <I extends Schema>(opcode: bigint, input: I) => ({
+  returns: <O extends Dec>(output: O): ViewSpec<I, O> => ({
     _t: VIEW_TAG,
     opcode,
     input,
@@ -118,12 +119,8 @@ const createViewBuilder = <I extends Enc>(opcode: bigint, input: I) => ({
   }),
 });
 
-const createExecuteBuilder = <I extends Enc>(
-  opcode: bigint,
-  input: I,
-  asInscription = false
-) => ({
-  returns: <O extends DecKind>(output: O): ExecuteSpec<I, O> => ({
+const createExecuteBuilder = <I extends Schema>(opcode: bigint, input: I, asInscription = false) => ({
+  returns: <O extends Dec>(output: O): ExecuteSpec<I, O> => ({
     _t: EXEC_TAG,
     opcode,
     input,
@@ -133,95 +130,47 @@ const createExecuteBuilder = <I extends Enc>(
 });
 
 /*─────────────────────────────────────────────────────────────*
- | 5.  Custom (single entry-point)                            |
- *─────────────────────────────────────────────────────────────*/
-
-// Generic impl type that preserves the `this` annotation
-type Impl<TThis extends AlkanesBaseContract, TArgs extends any[], TRet> = (
-  this: TThis,
-  ...args: TArgs
-) => TRet;
-
-/**
- * Define a custom view *or* execute.
- * - Heuristic: if the callback declares ≥2 runtime args
- *              → treated as EXECUTE.
- * - `opts` lets you refine input/output kinds & inscription flag.
- */
-/*─────────────────────────────────────────────────────────────*
  | 5.  Custom (single entry-point)                             |
  *─────────────────────────────────────────────────────────────*/
 /** Core impl shapes */
 type ViewImpl<P> = (this: AlkanesBaseContract, arg: P) => any;
-type ExecImpl<P> = (
-  this: AlkanesBaseContract,
-  address: string,
-  arg: P,
-  asInscription: boolean
-) => any;
+type ExecImpl<P> = (this: AlkanesBaseContract, address: string, arg: P, asInscription: boolean) => any;
 
-/**
- * defineCustom – generic in:
- *   P  = decoded **param** type   (defaults to `never`)
- *   O  = decode-kind for **return** (defaults `"uint8Array"`)
- */
-function defineCustom<P = never, O extends DecKind = "uint8Array">(
+type ExtractParam<T> = T extends (this: any, opcode: bigint, params: infer P) => any ? P : never;
+
+function defineCustom<Impl extends CustomImpl<any>, P = ExtractParam<Impl>, O extends Dec = "uint8Array">(
   opcode: bigint,
-  impl: ViewImpl<P> | ExecImpl<P>,
-  opts: ICustomOpts = {}
-): AnySpec {
-  const output = (opts.output ?? "uint8Array") as O;
-  const asInscription = opts.asInscription ?? false;
-
-  // decide EXEC vs VIEW
-  const isExec = impl.length >= 2;
-
-  return isExec
-    ? ({
-        _t: EXEC_TAG,
-        opcode,
-        input: VOID_ENC,
-        output,
-        asInscription,
-        impl,
-      } as ExecuteSpec<VoidEnc, O>) // safe cast
-    : ({
-        _t: VIEW_TAG,
-        opcode,
-        input: VOID_ENC,
-        output,
-        impl,
-      } as ViewSpec<VoidEnc, O>); // safe cast
+  impl: Impl,
+  opts?: { output?: O },
+): CustomSpec<P, O, Impl> {
+  const output = (opts?.output ?? "uint8Array") as O;
+  return {
+    _t: CUSTOM_TAG,
+    opcode,
+    input: undefined as unknown as P,
+    output,
+    impl, // ← strongly typed Impl here
+  };
 }
 /*------------------------------------------------------------*
  | 6.  Runtime wiring                                          |
  *------------------------------------------------------------*/
-function wireMethods(
-  target: AlkanesBaseContract,
-  spec: Record<string, AnySpec>
-) {
+function wireMethods(target: AlkanesBaseContract, spec: Record<string, AnySpec>) {
   for (const [name, meta] of Object.entries(spec)) {
     if (meta._t === VIEW_TAG) {
       (target as any)[name] = meta.impl
         ? meta.impl.bind(target)
-        : (arg?: any) =>
-            (target as any).handleView(meta.opcode, arg, meta.output);
-    } else {
+        : (arg?: any) => target.handleView(meta.opcode, arg, meta.input, meta.output);
+    } else if (meta._t === EXEC_TAG) {
       (target as any)[name] = meta.impl
-        ? (addr: string, arg?: any) =>
-            meta.impl!.call(target, addr, arg, meta.asInscription)
+        ? (addr: string, arg?: any) => meta.impl!.call(target, addr, arg, meta.asInscription)
         : (addr: string, arg?: any) =>
-            (target as any).handleExecute(
-              addr,
-              meta.opcode,
-              arg,
-              meta.output,
-              meta.asInscription
-            );
+            target.handleExecute(addr, meta.opcode, arg, meta.input, meta.output, meta.asInscription);
+    } else if (meta._t === CUSTOM_TAG) {
+      (target as any)[name] = (params?: any) => meta.impl!.call(target, meta.opcode, params!);
     }
   }
 }
-
 /*------------------------------------------------------------*
  | 7.  Duplicate‑opcode guard & table                          |
  *------------------------------------------------------------*/
@@ -244,33 +193,31 @@ function buildOpcodeTable(spec: Record<string, AnySpec>): OpcodeTable {
 /*------------------------------------------------------------*
  | 7. attach() – mixes ABI into a concrete subclass            |
  *------------------------------------------------------------*/
-function attach<
-  Spec extends Record<string, any>,
-  Base extends typeof AlkanesBaseContract,
->(BaseClass: Base, spec: Spec) {
+function attach<Spec extends Record<string, any>, Base extends typeof AlkanesBaseContract>(
+  BaseClass: Base,
+  spec: Spec,
+) {
   /* type helpers for methods --------------------------------------- */
   type ViewSignature<V extends ViewSpec> = (
-    arg: ResolveSchema<V["input"]>
-  ) => Promise<
-    BoxedResponse<ResolveSchema<V["output"]>, AlkanesSimulationError>
-  >;
+    arg: V["input"] extends VoidEnc ? void : ResolveSchema<V["input"]>,
+  ) => Promise<BoxedResponse<ResolveSchema<V["output"]>, AlkanesSimulationError>>;
 
   type ExecuteSignature<E extends ExecuteSpec> = (
     address: string,
-    arg: ResolveSchema<E["input"]>
-  ) => Promise<
-    BoxedResponse<
-      IDecodableAlkanesResponse<ResolveSchema<E["output"]>>,
-      AlkanesExecuteError
-    >
-  >;
+    arg: E["input"] extends VoidEnc ? void : ResolveSchema<E["input"]>,
+  ) => Promise<BoxedResponse<AlkanesPushExecuteResponse<ResolveSchema<E["output"]>>, AlkanesExecuteError>>;
+  type CustomSignature<C extends CustomSpec<any, any, any>> = C["input"] extends never
+    ? () => ReturnType<NonNullable<C["impl"]>>
+    : (params: C["input"]) => ReturnType<NonNullable<C["impl"]>>;
 
   type MethodMap = {
     [K in keyof Spec]: Spec[K] extends ViewSpec
       ? ViewSignature<Spec[K]>
       : Spec[K] extends ExecuteSpec
         ? ExecuteSignature<Spec[K]>
-        : never;
+        : Spec[K] extends CustomSpec<any, any, any>
+          ? CustomSignature<Spec[K]>
+          : never;
   };
 
   // @ts-expect-error TS2545 – mix-in: constructor uses generic spread
@@ -318,34 +265,22 @@ function contract<Base extends Record<string, any>>(base: Base) {
  *------------------------------------------------------------*/
 export const abi = {
   opcode: (code: bigint) => {
-    const viewFn = (<I extends Enc>(input?: I) =>
-      createViewBuilder(code, (input ?? VOID_ENC) as I)) as {
-      <I extends Enc>(input: I): ReturnType<typeof createViewBuilder<I>>;
+    const viewFn = (<I extends Schema>(input?: I) => createViewBuilder(code, (input ?? VOID_ENC) as I)) as {
+      <I extends Schema>(input: I): ReturnType<typeof createViewBuilder<I>>;
       (): ReturnType<typeof createViewBuilder<VoidEnc>>;
     };
 
-    const execFn = (<I extends Enc>(input?: I, as = false) =>
+    const execFn = (<I extends Schema>(input?: I, as = false) =>
       createExecuteBuilder(code, (input ?? VOID_ENC) as I, as)) as {
-      <I extends Enc>(
-        input: I,
-        as?: boolean
-      ): ReturnType<typeof createExecuteBuilder<I>>;
-      (
-        input?: undefined,
-        as?: boolean
-      ): ReturnType<typeof createExecuteBuilder<VoidEnc>>;
+      <I extends Schema>(input: I, as?: boolean): ReturnType<typeof createExecuteBuilder<I>>;
+      (input?: undefined, as?: boolean): ReturnType<typeof createExecuteBuilder<VoidEnc>>;
     };
 
     return {
       view: viewFn,
       execute: execFn,
-      custom: <
-        P = never, // ← NEW generic, user-supplied
-        O extends DecKind = "uint8Array",
-      >(
-        impl: ViewImpl<P> | ExecImpl<P>,
-        opts?: { output?: O; asInscription?: boolean }
-      ) => defineCustom<P, O>(code, impl, opts),
+      custom: <Impl extends CustomImpl<any>, O extends Dec = "uint8Array">(impl: Impl, opts?: { output?: O }) =>
+        defineCustom<Impl, ExtractParam<Impl>, O>(code, impl, opts),
     } as const;
   },
 
@@ -353,11 +288,6 @@ export const abi = {
 
   attach,
 
-  extend: <
-    A extends Record<string, AnySpec>,
-    B extends Record<string, AnySpec>,
-  >(
-    a: A,
-    b: B
-  ) => ({ ...a, ...b }) as A & B,
+  extend: <A extends Record<string, AnySpec>, B extends Record<string, AnySpec>>(a: A, b: B) =>
+    ({ ...a, ...b }) as A & B,
 } as const;

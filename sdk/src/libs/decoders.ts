@@ -51,12 +51,8 @@ export class DecodableAlkanesResponse<T = unknown> {
 
   /*──────────────────────────────────────────────────────────*/
   constructor(
-    payload:
-      | Uint8Array
-      | bigint
-      | AlkanesSimulationResult
-      | AlkanesTraceReturnEvent["data"],
-    schema?: BorshSchema<T>
+    payload: Uint8Array | bigint | AlkanesSimulationResult | AlkanesTraceReturnEvent["data"],
+    schema?: BorshSchema<T>,
   ) {
     this.borshSchema = schema;
 
@@ -66,24 +62,15 @@ export class DecodableAlkanesResponse<T = unknown> {
       this.bytes = bigintToLE(payload);
     } else if ("raw" in payload && payload.raw?.execution?.data) {
       this.bytes = hexToUint8Array(payload.raw.execution.data);
-    } else if (
-      "response" in payload &&
-      typeof payload.response?.data === "bigint"
-    ) {
+    } else if ("response" in payload && typeof payload.response?.data === "bigint") {
       this.bytes = bigintToLE(payload.response.data);
-    } else if (
-      "response" in payload &&
-      typeof payload.response?.data === "string"
-    ) {
+    } else if ("response" in payload && typeof payload.response?.data === "string") {
       this.bytes = hexToUint8Array(payload.response.data);
     } else {
       throw new Error("DecodableAlkanesResponse: unsupported payload shape");
     }
   }
 
-  /*----------------------------------------------------------*
-   | per-instance decoder table                               |
-   *----------------------------------------------------------*/
   private decoderTable(): DecoderFns<T> {
     const base: Omit<DecoderFns<T>, "object"> = {
       string: (buf) => new TextDecoder().decode(buf),
@@ -95,8 +82,7 @@ export class DecodableAlkanesResponse<T = unknown> {
 
       bigint: leBytesToBigint,
 
-      hex: (buf) =>
-        Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join(""),
+      hex: (buf) => Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join(""),
 
       uint8Array: (buf) => buf,
 
@@ -128,17 +114,13 @@ export class DecodableAlkanesResponse<T = unknown> {
     };
   }
 
-  /*----------------------------------------------------------*
-   | PUBLIC  decodeTo                                         |
-   *----------------------------------------------------------*/
-  decodeTo<K extends AvailableDecodeKind>(
-    kind: K
-  ): ReturnType<DecoderFns<T>[K]> {
-    const tbl = this.decoderTable() as DecoderFns<T>;
-    // the cast is safe –  key is constrained by K
-    return tbl[kind](this.bytes) as ReturnType<DecoderFns<T>[K]>;
+  decodeTo<K extends AvailableDecodeKind>(kind: K): ReturnType<DecoderFns<T>[K]> {
+    const table = this.decoderTable() as DecoderFns<T>;
+    return table[kind](this.bytes) as ReturnType<DecoderFns<T>[K]>;
   }
 }
 
-/* convenience alias for users that imported the old name */
 export type IDecodableAlkanesResponse<T> = DecodableAlkanesResponse<T>;
+export enum DecodeError {
+  UnknownError = "UnknownError",
+}

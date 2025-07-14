@@ -1,50 +1,35 @@
-import {
-  BoxedResponse,
-  isBoxedError,
-  BoxedSuccess,
-  BoxedError,
-  consumeOrThrow,
-} from "@/boxed";
-import {
-  AlkaneId,
-  AlkanesTraceCreateEvent,
-  AlkanesTraceInvokeEvent,
-  AlkanesTraceResult,
-  AlkanesTraceReturnEvent,
-} from "@/apis";
+import { BoxedResponse, isBoxedError, BoxedSuccess, BoxedError, consumeOrThrow } from "@/boxed";
+import { AlkaneId } from "@/apis";
 import { Provider } from "@/provider";
-import { Psbt } from "bitcoinjs-lib";
-import { AlkanesTraceError } from "@/apis";
-import { hexToUint8Array, sleep } from "@/utils";
+
 import { AlkanesExecuteError } from "../alkanes";
-import {
-  IDecodableAlkanesResponse,
-  DecodableAlkanesResponse,
-} from "../decoders";
+import { IDecodableAlkanesResponse, DecodableAlkanesResponse, DecoderFns, DecodeError } from "../decoders";
 import { Expand } from "@/utils";
-import { BorshSchema } from "borsher";
+import { BorshSchema, Infer as BorshInfer } from "borsher";
 import { abi, Schema, ResolveSchema } from "./builder"; // 🠕
+import { Encodable, EncodeError, EncoderFns } from "../encoders";
 
 export enum AlkanesSimulationError {
   UnknownError = "UnknownError",
   TransactionReverted = "Revert",
 }
+
 export type OpcodeTable = { readonly [K in string]: bigint };
 
 export type AlkanesPushExecuteResponse<T> = Expand<{
-  waitForResult: () => Promise<
-    BoxedResponse<IDecodableAlkanesResponse<T>, AlkanesExecuteError>
-  >;
+  waitForResult: () => Promise<BoxedResponse<IDecodableAlkanesResponse<T>, AlkanesExecuteError>>;
   txid: string;
 }>;
+
+const isBorshSchema = <T>(schema: Schema): schema is BorshSchema<T> => !(typeof schema === "string");
 
 export abstract class AlkanesBaseContract {
   constructor(
     protected readonly provider: Provider,
     public readonly alkaneId: AlkaneId,
-    private readonly signPsbtFn: (unsigned: string) => Promise<string>
+    private readonly signPsbtFn: (unsigned: string) => Promise<string>,
   ) {}
-  public abstract get OpCodes(): OpcodeTable;
+  protected abstract get OpCodes(): OpcodeTable;
 
   /*─────────────── thin helpers around Provider ───────────────*/
   protected get rpc() {
@@ -62,107 +47,118 @@ export abstract class AlkanesBaseContract {
     return this.signPsbtFn(unsigned);
   }
 
-  simulate(
-    request: Omit<Parameters<Provider["simulate"]>[0], "target">
-  ): ReturnType<Provider["simulate"]> {
+  protected simulate(request: Omit<Parameters<Provider["simulate"]>[0], "target">): ReturnType<Provider["simulate"]> {
     return this.provider.simulate({ target: this.alkaneId, ...request });
   }
-  pushExecute = async <T>(
+
+  private getEncodedCallData<I extends Schema>(arg: ResolveSchema<I>, shape: I): BoxedResponse<bigint[], EncodeError> {
+    if (shape === "__void") {
+      return new BoxedSuccess([]);
+    }
+    let encoder = isBorshSchema(shape) ? new Encodable(arg, shape) : new Encodable(arg);
+
+    let bigintArrayResponse = isBorshSchema(shape)
+      ? encoder.encodeFrom("object")
+      : encoder.encodeFrom(shape as keyof EncoderFns<unknown>);
+
+    return bigintArrayResponse;
+  }
+
+  private getDecodedResponse<O extends Schema>(
+    response: ConstructorParameters<typeof DecodableAlkanesResponse>[0],
+    outShape: O,
+  ): BoxedResponse<ResolveSchema<O>, DecodeError> {
+    try {
+      let decodable = isBorshSchema(outShape)
+        ? new DecodableAlkanesResponse(response, outShape)
+        : new DecodableAlkanesResponse(response);
+      let decodedResponse = isBorshSchema(outShape)
+        ? decodable.decodeTo("object")
+        : decodable.decodeTo(outShape as keyof DecoderFns<unknown>);
+      return new BoxedSuccess(decodedResponse as ResolveSchema<O>);
+    } catch (error) {
+      return new BoxedError(DecodeError.UnknownError, "Decoding response failed: " + (error as Error).message);
+    }
+  }
+
+  protected pushExecute = async <T>(
     config: Parameters<Provider["execute"]>[0],
-    borshSchema?: BorshSchema<T>
-  ): Promise<
-    BoxedResponse<AlkanesPushExecuteResponse<T>, AlkanesExecuteError>
-  > => {
+    borshSchema?: BorshSchema<T>,
+  ): Promise<BoxedResponse<AlkanesPushExecuteResponse<T>, AlkanesExecuteError>> => {
     try {
       const unsignedPsbt = consumeOrThrow(
         await this.provider.execute({
           ...config,
           callData: [this.alkaneId.block, this.alkaneId.tx, ...config.callData],
-        })
+        }),
       );
 
       const signedTx = await this.signPsbt(unsignedPsbt.psbt);
 
-      const txid = consumeOrThrow(
-        await this.provider.rpc.electrum.esplora_broadcastTx(signedTx)
-      );
+      const txid = consumeOrThrow(await this.provider.rpc.electrum.esplora_broadcastTx(signedTx));
 
       return new BoxedSuccess({
-        waitForResult: async (): Promise<
-          BoxedResponse<IDecodableAlkanesResponse<T>, AlkanesExecuteError>
-        > => {
+        waitForResult: async (): Promise<BoxedResponse<IDecodableAlkanesResponse<T>, AlkanesExecuteError>> => {
           try {
-            const traceResult = consumeOrThrow(
-              await this.provider.waitForTraceResult(txid)
-            );
-            return new BoxedSuccess(
-              new DecodableAlkanesResponse(traceResult.return, borshSchema)
-            );
+            const traceResult = consumeOrThrow(await this.provider.waitForTraceResult(txid));
+            return new BoxedSuccess(new DecodableAlkanesResponse(traceResult.return, borshSchema));
           } catch (err) {
             return new BoxedError(
               AlkanesExecuteError.UnknownError,
-              "Wait for result failed: " + (err as Error).message
+              "Wait for result failed: " + (err as Error).message,
             );
           }
         },
         txid,
       });
     } catch (err) {
-      return new BoxedError(
-        AlkanesExecuteError.UnknownError,
-        "Push execute failed: " + (err as Error).message
-      );
+      return new BoxedError(AlkanesExecuteError.UnknownError, "Push execute failed: " + (err as Error).message);
     }
   };
 
-  protected async handleView<I extends Schema, O extends Schema>(
+  public async handleView<I extends Schema, O extends Schema>(
     opcode: bigint,
     arg: ResolveSchema<I>,
-    outShape: O // may or may not be a BorshSchema
+    inShape: I, // may or may not be a BorshSchema
+    outShape: O, // may or may not be a BorshSchema
   ): Promise<BoxedResponse<ResolveSchema<O>, AlkanesSimulationError>> {
-    console.log("params passed in:");
-    console.log(opcode, arg, outShape);
+    try {
+      let callData: bigint[] = [
+        opcode, // opcode for Word Count
+        ...consumeOrThrow(this.getEncodedCallData(arg, inShape)),
+      ];
 
-    const callData = [opcode];
-    const raw = consumeOrThrow(await this.simulate({ callData }));
+      let response = consumeOrThrow(
+        await this.simulate({
+          callData,
+        }),
+      );
 
-    const maybeSchema =
-      outShape instanceof BorshSchema
-        ? (outShape as BorshSchema<ResolveSchema<O>>)
-        : undefined;
-
-    //return new BoxedSuccess(
-    //new DecodableAlkanesResponse(raw, maybeSchema).toObject()
-    //);
-
-    return "" as any; // TODO: implement this
+      return new BoxedSuccess(consumeOrThrow(this.getDecodedResponse(response, outShape)));
+    } catch (error) {
+      return new BoxedError(AlkanesSimulationError.UnknownError, "Simulation failed: " + (error as Error).message);
+    }
   }
 
-  /*──────────────────────────────────────────────────────────*
-   | Execute helper                                           |
-   *──────────────────────────────────────────────────────────*/
-  protected handleExecute<I extends Schema, O extends Schema>(
+  public async handleExecute<I extends Schema, O extends Schema>(
     address: string,
     opcode: bigint,
     arg: ResolveSchema<I>,
+    inShape: I,
     outShape: O,
-    asInscription: boolean
-  ): Promise<
-    BoxedResponse<
-      AlkanesPushExecuteResponse<ResolveSchema<O>>,
-      AlkanesExecuteError
-    >
-  > {
-    console.log("params passed in:");
-    console.log(address, opcode, arg, outShape, asInscription);
-    const config = {
-      address,
-      callData: [opcode], // TODO encode `arg`
-    };
+    asInscription: boolean,
+  ): Promise<BoxedResponse<AlkanesPushExecuteResponse<ResolveSchema<O>>, AlkanesExecuteError>> {
+    try {
+      let callData: bigint[] = [opcode, ...consumeOrThrow(this.getEncodedCallData(arg, inShape))];
 
-    const maybeSchema = outShape instanceof BorshSchema ? outShape : undefined;
+      const executePromise = isBorshSchema<BorshInfer<typeof outShape>>(outShape)
+        ? this.pushExecute<BorshInfer<typeof outShape>>({ address, callData }, outShape)
+        : this.pushExecute({ address, callData });
 
-    //return this.pushExecute(config, maybeSchema);
-    return "" as any;
+      const response = await executePromise;
+      return response as BoxedResponse<AlkanesPushExecuteResponse<ResolveSchema<O>>, AlkanesExecuteError>;
+    } catch (error) {
+      return new BoxedError(AlkanesExecuteError.UnknownError, "Execution failed: " + (error as Error).message);
+    }
   }
 }

@@ -7,8 +7,7 @@ import { walletSigner } from "@/crypto/wallet";
 import { taskLogger as logger } from "@/consts";
 import { consumeOrThrow } from "@/boxed";
 
-const readableAlkaneId = (id: AlkaneId) =>
-  `(block→${Number(id.block)}n : tx→${Number(id.tx)}n)`;
+const readableAlkaneId = (id: AlkaneId) => `(block→${Number(id.block)}n : tx→${Number(id.tx)}n)`;
 
 export const runSandbox = async (): Promise<boolean> => {
   const root = logger.start("deploy & inspect sandbox contract");
@@ -20,17 +19,10 @@ export const runSandbox = async (): Promise<boolean> => {
     );
     logger.success(`contract at ${readableAlkaneId(freeMintId)}`);
 
-    const tokenContract = new SandboxContract(
-      provider,
-      freeMintId,
-      walletSigner.signPsbt
-    );
+    const sandboxContract = new SandboxContract(provider, freeMintId, walletSigner.signPsbt);
 
     let countResponse = consumeOrThrow(
-      await logger.progressAbstract(
-        "getWordCount",
-        tokenContract.viewWordCount("I have four words")
-      )
+      await logger.progressAbstract("getWordCount", sandboxContract.wordCount({ data: "I have four words" }))
     );
 
     logger.deepAssert(4, countResponse.count);

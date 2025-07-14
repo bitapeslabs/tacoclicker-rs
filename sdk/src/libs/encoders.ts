@@ -54,48 +54,34 @@ export enum EncodeError {
 /*------------------------------------------------------------*
  | 3.  encode-kind table                                       |
  *------------------------------------------------------------*/
-interface EncoderFns<Obj> {
+export interface EncoderFns<Obj> {
   string: (data: unknown) => BoxedResponse<bigint[], EncodeError>;
   name: (data: unknown) => BoxedResponse<bigint[], EncodeError>;
   char: (data: unknown) => BoxedResponse<bigint[], EncodeError>;
-  object: (
-    data: unknown,
-    schema?: BorshSchema<Obj>
-  ) => BoxedResponse<bigint[], EncodeError>;
+  object: (data: unknown, schema?: BorshSchema<Obj>) => BoxedResponse<bigint[], EncodeError>;
 }
 
-export type AvailableEncodeKind = keyof EncoderFns<unknown>; // "string" | …
+export type AvailableEncodeKind = keyof EncoderFns<unknown>;
 
-/*------------------------------------------------------------*
- | 4.  Encodable <T> with a *single* `encodeTo` method          |
- *------------------------------------------------------------*/
 export class Encodable<T = unknown> {
   constructor(
     public readonly payload: unknown,
-    private readonly borshSchema?: BorshSchema<T>
+    private readonly borshSchema?: BorshSchema<T>,
   ) {}
 
   /* per-instance encoder table */
   private encoderTable(): EncoderFns<T> {
     return {
-      /*----------------------------------------------------*/
       string: (data) => {
         if (typeof data !== "string") {
-          return new BoxedError(
-            EncodeError.InvalidPayload,
-            "Payload must be a string"
-          );
+          return new BoxedError(EncodeError.InvalidPayload, "Payload must be a string");
         }
         return new BoxedSuccess(encodeStringToU128Array(data));
       },
 
-      /*----------------------------------------------------*/
       name: (data) => {
         if (typeof data !== "string") {
-          return new BoxedError(
-            EncodeError.InvalidPayload,
-            "Payload must be a string"
-          );
+          return new BoxedError(EncodeError.InvalidPayload, "Payload must be a string");
         }
         const arr = encodeStringToU128Array(data);
         if (arr.length > 2) return new BoxedError(EncodeError.NameTooLong);
@@ -103,26 +89,18 @@ export class Encodable<T = unknown> {
         return new BoxedSuccess(arr);
       },
 
-      /*----------------------------------------------------*/
       char: (data) => {
         if (typeof data !== "string") {
-          return new BoxedError(
-            EncodeError.InvalidPayload,
-            "Payload must be a string"
-          );
+          return new BoxedError(EncodeError.InvalidPayload, "Payload must be a string");
         }
         const arr = encodeStringToU128Array(data);
         if (arr.length > 1) return new BoxedError(EncodeError.CharTooLong);
         return new BoxedSuccess(arr);
       },
 
-      /*----------------------------------------------------*/
       object: (data, schema) => {
         if (!schema) {
-          return new BoxedError(
-            EncodeError.BorshMissing,
-            "Missing Borsh schema"
-          );
+          return new BoxedError(EncodeError.BorshMissing, "Missing Borsh schema");
         }
         const bytes = borshSerialize(schema, data);
         return new BoxedSuccess(encodeBytesToU128Array(bytes));
@@ -130,14 +108,9 @@ export class Encodable<T = unknown> {
     };
   }
 
-  /* public façade – **one** method like decodeTo ------------------*/
-  encodeTo<K extends AvailableEncodeKind>(
-    kind: K
-  ): ReturnType<EncoderFns<T>[K]> {
-    // satisfy TS: we know the key exists
-    const tbl = this.encoderTable() as EncoderFns<T>;
-    // @ts-expect-error – runtime check handled in each encoder
-    return tbl[kind](this.payload, this.borshSchema);
+  encodeFrom<K extends AvailableEncodeKind>(kind: K): BoxedResponse<bigint[], EncodeError> {
+    const table = this.encoderTable() as EncoderFns<T>;
+    return table[kind](this.payload, this.borshSchema);
   }
 }
 
