@@ -95,7 +95,6 @@ export class TaskLogger {
     let spinner = this.progress(`submitting ${functionName} tx…`);
 
     try {
-      this.info(`Executing ${functionName}…`);
       let { txid, waitForResult } = consumeOrThrow(await executeResponse);
       spinner.succeed(`Done. Txid: ${txid}`);
 

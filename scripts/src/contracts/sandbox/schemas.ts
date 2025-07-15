@@ -4,6 +4,10 @@ export const schemaWordCountRequest = BorshSchema.Struct({
   data: BorshSchema.String,
 });
 
+export const schemaInscribeWordCountRequest = BorshSchema.Struct({
+  inscribe: BorshSchema.String,
+});
+
 export type IWordCountRequest = BorshInfer<typeof schemaWordCountRequest>;
 
 export const schemaWordCountResponse = BorshSchema.Struct({

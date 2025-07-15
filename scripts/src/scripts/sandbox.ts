@@ -22,8 +22,18 @@ export const runSandbox = async (): Promise<boolean> => {
     const sandboxContract = new SandboxContract(provider, freeMintId, walletSigner.signPsbt);
 
     let countResponse = consumeOrThrow(
-      await logger.progressAbstract("getWordCount", sandboxContract.wordCount({ data: "I have four words" }))
-    );
+      await logger.progressExecute(
+        "getWordCount",
+        sandboxContract.wordCount(
+          walletSigner.address,
+          { data: "I have four words" },
+          {
+            inscribe:
+              "I have a lot more than four words if you count all of these and I can do that because I am in an inscription and arent bound by the limits of opreturn anymore so that makes me happy",
+          }
+        )
+      )
+    ).decodeTo("object");
 
     logger.deepAssert(4, countResponse.count);
 

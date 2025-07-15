@@ -10,9 +10,7 @@ export function mapToPrimitives(v: any): any {
       if (v === null) return null;
       if (Buffer.isBuffer(v)) return "0x" + v.toString("hex");
       if (Array.isArray(v)) return v.map(mapToPrimitives);
-      return Object.fromEntries(
-        Object.entries(v).map(([k, val]) => [k, mapToPrimitives(val)])
-      );
+      return Object.fromEntries(Object.entries(v).map(([k, val]) => [k, mapToPrimitives(val)]));
     }
     default:
       return v;
@@ -22,33 +20,26 @@ export function mapToPrimitives(v: any): any {
 export function unmapFromPrimitives(v: any): any {
   switch (typeof v) {
     case "string":
-      if (v.startsWith("0x") && v !== "0x")
-        return Buffer.from(stripHex(v), "hex");
+      if (v.startsWith("0x") && v !== "0x") return Buffer.from(stripHex(v), "hex");
       if (!isNaN(v as any)) return BigInt(v);
       return v;
     case "object": {
       if (v === null) return null;
       if (Array.isArray(v)) return v.map(unmapFromPrimitives);
-      return Object.fromEntries(
-        Object.entries(v).map(([k, val]) => [k, unmapFromPrimitives(val)])
-      );
+      return Object.fromEntries(Object.entries(v).map(([k, val]) => [k, unmapFromPrimitives(val)]));
     }
     default:
       return v;
   }
 }
 
-export function parseSimulateReturn(
-  v: string
-): AlkanesParsedSimulationResult | undefined {
+export function parseSimulateReturn(v: string): AlkanesParsedSimulationResult | undefined {
   if (v === "0x") return undefined;
 
   const toUtf8 = Buffer.from(stripHex(v), "hex").toString("utf8");
   const isUtf8 = !/[\uFFFD]/.test(toUtf8);
 
-  const rev = Buffer.from(
-    Array.from(Buffer.from(stripHex(v), "hex")).reverse()
-  ).toString("hex");
+  const rev = Buffer.from(Array.from(Buffer.from(stripHex(v), "hex")).reverse()).toString("hex");
 
   return {
     string: isUtf8 ? toUtf8 : "0x" + stripHex(v),
@@ -86,7 +77,11 @@ function deepHexToBigInt<T>(value: T): unknown {
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
-      out[k] = deepHexToBigInt(v as never);
+      if (k === "data") {
+        out[k] = v; // leave 'data' field untouched
+      } else {
+        out[k] = deepHexToBigInt(v as never);
+      }
     }
     return out;
   }
@@ -98,9 +93,7 @@ function deepHexToBigInt<T>(value: T): unknown {
   return value;
 }
 
-export function decodeAlkanesTrace(
-  encoded: AlkanesTraceEncodedResult
-): AlkanesTraceResult {
+export function decodeAlkanesTrace(encoded: AlkanesTraceEncodedResult): AlkanesTraceResult {
   // `deepHexToBigInt` already returns data in the correct shape,
   // but TS needs a cast to satisfy the compiler.
   const decoded = deepHexToBigInt(encoded) as unknown as AlkanesTraceResult;
@@ -117,7 +110,7 @@ export function extractAbiErrorMessage(data: string): string | null {
 
   const hexToUtf8 = (h: string): string =>
     decodeURIComponent(
-      h.replace(/(..)/g, "%$1") // percent-encode every byte
+      h.replace(/(..)/g, "%$1"), // percent-encode every byte
     );
 
   if (body.length >= 128 && body.startsWith("0".repeat(62) + "20")) {

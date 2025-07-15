@@ -2,7 +2,7 @@
 import { runSandbox } from "./sandbox";
 import { runFreeMint } from "./freemint";
 //import { runGetAddressDetails } from "./address";
-//import { runCommitRevealInscriptionTest } from "./testinscription";
+import { runCommitRevealInscriptionTest } from "./testinscription";
 import { runGeneralTest } from "./tests";
 export const commands = {
   //Deploys, inspects and asserts tests freemint.wasm
@@ -10,6 +10,6 @@ export const commands = {
   //"--tacoclicker": runTacoClicker,
   "--sandbox": runSandbox,
   //"--address": runGetAddressDetails,
-  //"--testinscription": runCommitRevealInscriptionTest,
+  "--testinscription": runCommitRevealInscriptionTest,
   "--test": runGeneralTest,
 };

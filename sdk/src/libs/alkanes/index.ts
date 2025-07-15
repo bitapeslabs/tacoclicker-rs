@@ -3,15 +3,15 @@ import { addInputDynamic, getEstimatedFee, minimumFee } from "./utils";
 
 import { FormattedUtxo } from "@/apis/sandshrew";
 import { encodeRunestoneProtostone, encipher, ProtoStone } from "alkanes";
-import {
-  BoxedResponse,
-  BoxedSuccess,
-  BoxedError,
-  consumeOrThrow,
-} from "@/boxed";
+import { BoxedResponse, BoxedSuccess, BoxedError, consumeOrThrow } from "@/boxed";
 import { AlkaneSimulateRequest } from "@/apis/alkanes";
 import { Provider } from "@/provider";
-import { getProtostoneUnsignedPsbtBase64, SingularTransfer } from "./psbt";
+import {
+  AlkanesInscription,
+  getProtostoneTransactionsWithInscription,
+  getProtostoneUnsignedPsbtBase64,
+  SingularTransfer,
+} from "./psbt";
 
 export enum AlkanesExecuteError {
   UnknownError = "UnknownError",
@@ -34,34 +34,44 @@ export const execute = async ({
   callData,
   feeRate,
   transfers,
+  inscription,
+  signPsbt,
 }: {
   provider: Provider;
   address: string;
   callData: bigint[];
+  signPsbt: (unsignedPsbtBase64: string) => Promise<string>;
   feeRate?: number;
   transfers?: SingularTransfer[];
-}): Promise<BoxedResponse<AlkanesExecuteResponse, AlkanesExecuteError>> => {
+  inscription?: AlkanesInscription<unknown>;
+}): Promise<BoxedResponse<string[], AlkanesExecuteError>> => {
   try {
-    const {
-      psbtBase64: psbt,
-      fee,
-      vsize,
-    } = consumeOrThrow(
-      await getProtostoneUnsignedPsbtBase64(address, {
+    if (!inscription) {
+      const { psbtBase64: psbt } = consumeOrThrow(
+        await getProtostoneUnsignedPsbtBase64(address, {
+          provider,
+          transfers: transfers ?? [],
+          callData,
+          feeRate,
+        }),
+      );
+
+      return new BoxedSuccess([await signPsbt(psbt)]);
+    }
+
+    const inscriptionTransactions = consumeOrThrow(
+      await getProtostoneTransactionsWithInscription(address, inscription, signPsbt, {
         provider,
         transfers: transfers ?? [],
         callData,
         feeRate,
-      })
+      }),
     );
 
-    return new BoxedSuccess({ psbt, fee, vsize });
+    return new BoxedSuccess(inscriptionTransactions);
   } catch (err) {
     console.error("Alkanes execute error:", err);
-    return new BoxedError(
-      AlkanesExecuteError.UnknownError,
-      (err as Error)?.message ?? "Unknown Error"
-    );
+    return new BoxedError(AlkanesExecuteError.UnknownError, (err as Error)?.message ?? "Unknown Error");
   }
 };
 

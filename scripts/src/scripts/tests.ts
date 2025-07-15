@@ -1,7 +1,7 @@
 import { BoxedSuccess, consumeOrThrow } from "@/boxed";
 import { taskLogger as logger, provider } from "@/consts";
 import { walletSigner } from "@/crypto/wallet";
-import { abi, AlkanesBaseContract } from "tacoclicker-sdk";
+import { abi, AlkanesBaseContract, SingularAlkanesTransfer } from "tacoclicker-sdk";
 import { BorshSchema } from "borsher";
 const myschema = BorshSchema.Struct({
   message: BorshSchema.String,
@@ -14,7 +14,8 @@ const MyContractABI = abi.contract({
     return new BoxedSuccess("Custom method executed successfully");
   }),
 
-  theirmethod: abi.opcode(1n).view(myschema).returns(myschema),
+  theirmethod: abi.opcode(1n).execute(myschema).returns(myschema),
+  inscribe: abi.opcode(2n).execute(undefined, myschema).returns("uint8Array"),
 });
 
 class MyContract extends abi.attach(AlkanesBaseContract, MyContractABI) {}
@@ -31,7 +32,24 @@ export const runGeneralTest = async (): Promise<boolean> => {
   );
 
   try {
-    const test = consumeOrThrow(await contract.theirmethod({ message: "Hello" }));
+    const test = consumeOrThrow(
+      await contract.inscribe(
+        "asd",
+        { message: "please inscribe this" },
+        {
+          transfers: [
+            {
+              asset: {
+                block: 2n,
+                tx: 101n,
+              },
+              address: walletSigner.address,
+              amount: 10n,
+            } as SingularAlkanesTransfer,
+          ],
+        }
+      )
+    );
     console.log("Test method result:", test);
 
     return true;

@@ -45,7 +45,7 @@ export const TokenABI = abi.contract({
       ...symbolEncoded,
     ];
 
-    const res = consumeOrThrow(await this.pushExecute({ address: params.address, callData }));
+    const res = consumeOrThrow(await this.pushExecute({ signPsbt: this.signPsbt, address: params.address, callData }));
     return new BoxedSuccess(res);
   }),
 

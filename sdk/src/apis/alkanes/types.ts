@@ -220,7 +220,7 @@ export interface AlkanesTraceReturnEvent {
     status: "success" | "revert";
     response: {
       alkanes: Alkane[];
-      data: bigint;
+      data: string;
       storage: {
         key: string;
         value: bigint;
@@ -229,9 +229,6 @@ export interface AlkanesTraceReturnEvent {
   };
 }
 
-export type AlkanesTraceEvent =
-  | AlkanesTraceCreateEvent
-  | AlkanesTraceInvokeEvent
-  | AlkanesTraceReturnEvent;
+export type AlkanesTraceEvent = AlkanesTraceCreateEvent | AlkanesTraceInvokeEvent | AlkanesTraceReturnEvent;
 
 export type AlkanesTraceResult = AlkanesTraceEvent[];

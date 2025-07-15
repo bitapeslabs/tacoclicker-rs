@@ -32,19 +32,14 @@ export function getSigner(mnemonic: string): WalletSigner {
 
 const sha256 = (m: Uint8Array) => createHash("sha256").update(m).digest();
 
-export function signMessage(
-  walletSigner: WalletSigner,
-  message: string
-): string {
+export function signMessage(walletSigner: WalletSigner, message: string): string {
   const taprootSigner = toTaprootSigner(walletSigner);
 
   if (!taprootSigner.signSchnorr) {
     throw new Error("Schnorr signing not supported by this signer");
   }
 
-  return taprootSigner
-    .signSchnorr(sha256(Buffer.from(message)))
-    .toString("hex");
+  return taprootSigner.signSchnorr(sha256(Buffer.from(message))).toString("hex");
 }
 
 export const getPubKey = (signer: WalletSigner): Buffer => {
@@ -62,17 +57,13 @@ export function toTaprootSigner(signer: WalletSigner) {
   const childNode = rootKey.derivePath(getPath());
   const childNodeXOnlyPubkey = toXOnly(Buffer.from(childNode.publicKey));
 
-  const tweakedChildNode = childNode.tweak(
-    bitcoin.crypto.taggedHash("TapTweak", childNodeXOnlyPubkey)
-  );
+  const tweakedChildNode = childNode.tweak(bitcoin.crypto.taggedHash("TapTweak", childNodeXOnlyPubkey));
 
   return {
     ...tweakedChildNode,
     publicKey: Buffer.from(tweakedChildNode.publicKey),
-    sign: (message: Buffer) =>
-      Buffer.from(tweakedChildNode.sign(Buffer.from(message))),
-    signSchnorr: (message: Buffer) =>
-      Buffer.from(tweakedChildNode.signSchnorr(Buffer.from(message))),
+    sign: (message: Buffer) => Buffer.from(tweakedChildNode.sign(Buffer.from(message))),
+    signSchnorr: (message: Buffer) => Buffer.from(tweakedChildNode.signSchnorr(Buffer.from(message))),
   } as bitcoin.Signer;
 }
 
@@ -129,18 +120,12 @@ export function getCurrentTaprootAddress(signer: WalletSigner): string {
 }
 
 // ––––– helper: simple AES‑256‑GCM encryption ––––– //
-export function encryptMnemonic(
-  mnemonic: string,
-  password: string
-): EncryptedMnemonic {
+export function encryptMnemonic(mnemonic: string, password: string): EncryptedMnemonic {
   const salt = crypto.randomBytes(16);
   const key = crypto.scryptSync(password, salt, 32); // KDF
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const ciphertext = Buffer.concat([
-    cipher.update(mnemonic, "utf8"),
-    cipher.final(),
-  ]);
+  const ciphertext = Buffer.concat([cipher.update(mnemonic, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
 
   return {
@@ -181,10 +166,7 @@ export function ecPairFromWalletSigner(
     network,
   });
 }
-export async function signPsbt(
-  base64Psbt: string,
-  walletSigner: WalletSigner
-): Promise<string> {
+export async function signPsbt(base64Psbt: string, walletSigner: WalletSigner): Promise<string> {
   try {
     const psbt = bitcoin.Psbt.fromBase64(base64Psbt, {
       network: provider.network,
@@ -197,7 +179,6 @@ export async function signPsbt(
 
       // Skip inputs already finalized (have finalScriptWitness or finalScriptSig)
       if (input.finalScriptWitness || input.finalScriptSig) {
-        console.log(`Input ${i} already finalized, skipping...`);
         continue;
       }
 
@@ -218,15 +199,11 @@ export const walletSigner: BrowserLikeWalletSigner = {
   oyl: getOylAccountFromSigner(taprootDecryptedWallet.signer, provider),
   signer: taprootDecryptedWallet.signer,
   ecsigner: ecPairFromWalletSigner(taprootDecryptedWallet.signer),
-  signPsbt: (unsignedPsbtBase64: string) =>
-    signPsbt(unsignedPsbtBase64, taprootDecryptedWallet.signer),
+  signPsbt: (unsignedPsbtBase64: string) => signPsbt(unsignedPsbtBase64, taprootDecryptedWallet.signer),
   address: getCurrentTaprootAddress(taprootDecryptedWallet.signer),
 };
 
-export function decryptWalletWithPassword(
-  encrypted: EncryptedMnemonic,
-  password: string
-): DecryptedWallet {
+export function decryptWalletWithPassword(encrypted: EncryptedMnemonic, password: string): DecryptedWallet {
   const salt = Buffer.from(encrypted.salt, "hex");
   const key = crypto.scryptSync(password, salt, 32);
   const iv = Buffer.from(encrypted.iv, "hex");

@@ -2,11 +2,11 @@ import { BoxedResponse, isBoxedError, BoxedSuccess, BoxedError, consumeOrThrow }
 import { AlkaneId } from "@/apis";
 import { Provider } from "@/provider";
 
-import { AlkanesExecuteError } from "../alkanes";
+import { AlkanesExecuteError, AlkanesInscription, ProtostoneTransactionOptions } from "../alkanes";
 import { IDecodableAlkanesResponse, DecodableAlkanesResponse, DecoderFns, DecodeError } from "../decoders";
-import { Expand } from "@/utils";
-import { BorshSchema, Infer as BorshInfer } from "borsher";
-import { abi, Schema, ResolveSchema } from "./builder"; // 🠕
+import { Expand, sleep } from "@/utils";
+import { BorshSchema, Infer as BorshInfer, borshSerialize } from "borsher";
+import { abi, Schema, ResolveSchema, Dec } from "./builder"; // 🠕
 import { Encodable, EncodeError, EncoderFns } from "../encoders";
 
 export enum AlkanesSimulationError {
@@ -21,7 +21,7 @@ export type AlkanesPushExecuteResponse<T> = Expand<{
   txid: string;
 }>;
 
-const isBorshSchema = <T>(schema: Schema): schema is BorshSchema<T> => !(typeof schema === "string");
+const isBorshSchema = <T>(schema: Schema | Dec): schema is BorshSchema<T> => !(typeof schema === "string");
 
 export abstract class AlkanesBaseContract {
   constructor(
@@ -43,8 +43,8 @@ export abstract class AlkanesBaseContract {
     return this.provider.trace.bind(this.provider);
   }
 
-  protected signPsbt(unsigned: string) {
-    return this.signPsbtFn(unsigned);
+  protected get signPsbt() {
+    return this.signPsbtFn.bind(this);
   }
 
   protected simulate(request: Omit<Parameters<Provider["simulate"]>[0], "target">): ReturnType<Provider["simulate"]> {
@@ -86,21 +86,24 @@ export abstract class AlkanesBaseContract {
     borshSchema?: BorshSchema<T>,
   ): Promise<BoxedResponse<AlkanesPushExecuteResponse<T>, AlkanesExecuteError>> => {
     try {
-      const unsignedPsbt = consumeOrThrow(
+      const signedTxs = consumeOrThrow(
         await this.provider.execute({
           ...config,
           callData: [this.alkaneId.block, this.alkaneId.tx, ...config.callData],
         }),
       );
 
-      const signedTx = await this.signPsbt(unsignedPsbt.psbt);
-
-      const txid = consumeOrThrow(await this.provider.rpc.electrum.esplora_broadcastTx(signedTx));
+      let lastTxid: string = "";
+      for (const signedTx of signedTxs) {
+        lastTxid = consumeOrThrow(await this.provider.rpc.electrum.esplora_broadcastTx(signedTx));
+        await sleep(1000);
+      }
 
       return new BoxedSuccess({
         waitForResult: async (): Promise<BoxedResponse<IDecodableAlkanesResponse<T>, AlkanesExecuteError>> => {
           try {
-            const traceResult = consumeOrThrow(await this.provider.waitForTraceResult(txid));
+            const traceResult = consumeOrThrow(await this.provider.waitForTraceResult(lastTxid));
+
             return new BoxedSuccess(new DecodableAlkanesResponse(traceResult.return, borshSchema));
           } catch (err) {
             return new BoxedError(
@@ -109,7 +112,7 @@ export abstract class AlkanesBaseContract {
             );
           }
         },
-        txid,
+        txid: lastTxid,
       });
     } catch (err) {
       return new BoxedError(AlkanesExecuteError.UnknownError, "Push execute failed: " + (err as Error).message);
@@ -140,20 +143,30 @@ export abstract class AlkanesBaseContract {
     }
   }
 
-  public async handleExecute<I extends Schema, O extends Schema>(
+  public async handleExecute<I extends Schema, K extends BorshSchema<unknown>, O extends Dec>(
     address: string,
     opcode: bigint,
     arg: ResolveSchema<I>,
+    argInscription: ResolveSchema<K> | undefined,
     inShape: I,
+    inInscriptionShape: K | undefined, // may or may not be a BorshSchema
     outShape: O,
-    asInscription: boolean,
+    txOpts?: Partial<ProtostoneTransactionOptions>,
   ): Promise<BoxedResponse<AlkanesPushExecuteResponse<ResolveSchema<O>>, AlkanesExecuteError>> {
     try {
+      let inscription: AlkanesInscription<unknown> | undefined;
+      if (argInscription && inInscriptionShape) {
+        inscription = new AlkanesInscription(argInscription, inInscriptionShape);
+      }
+
       let callData: bigint[] = [opcode, ...consumeOrThrow(this.getEncodedCallData(arg, inShape))];
 
       const executePromise = isBorshSchema<BorshInfer<typeof outShape>>(outShape)
-        ? this.pushExecute<BorshInfer<typeof outShape>>({ address, callData }, outShape)
-        : this.pushExecute({ address, callData });
+        ? this.pushExecute<BorshInfer<typeof outShape>>(
+            { address, callData, signPsbt: this.signPsbt, inscription, ...txOpts },
+            outShape,
+          )
+        : this.pushExecute({ address, callData, signPsbt: this.signPsbt, inscription, ...txOpts });
 
       const response = await executePromise;
       return response as BoxedResponse<AlkanesPushExecuteResponse<ResolveSchema<O>>, AlkanesExecuteError>;
