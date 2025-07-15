@@ -1,8 +1,8 @@
 {
   "rust-analyzer.linkedProjects": [
-    "contracts/tortilla/Cargo.toml",
+    "contracts/tacoclicker/Cargo.toml",
     "contracts/sandbox/Cargo.toml",
-    "contracts/taqueria-factory/Cargo.toml",
+    "contracts/controlled-mint/Cargo.toml",
     "contracts/free-mint/Cargo.toml"
   ],
   "rust-analyzer.cargo.extraArgs": ["--target", "wasm32-unknown-unknown"],

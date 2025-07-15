@@ -118,29 +118,35 @@ type AnySpec = ViewSpec<any, any> | ExecuteSpec<any, any, any> | CustomSpec<any,
 /*------------------------------------------------------------*
  | 4.  Builder helpers                                         |
  *------------------------------------------------------------*/
-const createViewBuilder = <I extends Schema>(opcode: bigint, input: I) => ({
-  returns: <O extends Dec>(output: O): ViewSpec<I, O> => ({
+const createViewBuilder = <I extends Schema>(opcode: bigint, input: I) => {
+  /* allow .returns() or .returns(schema) */
+  const returns = <O extends Dec = "uint8Array">(output?: O): ViewSpec<I, O> => ({
     _t: VIEW_TAG,
     opcode,
     input,
-    output,
-  }),
-});
+    // if omitted, default to "uint8Array"
+    output: (output ?? "uint8Array") as O,
+  });
 
-/** inscription – if supplied – must be a BorshSchema */
+  return { returns } as const;
+};
+
+/* ---------- EXECUTE ---------- */
 const createExecuteBuilder = <I extends Schema = VoidEnc, K extends BorshSchema<any> | VoidEnc = VoidEnc>(
   opcode: bigint,
   input: I,
   inscription?: K,
-) => ({
-  returns: <O extends Dec>(output: O): ExecuteSpec<I, K, O> => ({
+) => {
+  const returns = <O extends Dec = "uint8Array">(output?: O): ExecuteSpec<I, K, O> => ({
     _t: EXEC_TAG,
     opcode,
     input,
-    output,
+    output: (output ?? "uint8Array") as O,
     inscription: (inscription ?? VOID_ENC) as K,
-  }),
-});
+  });
+
+  return { returns } as const;
+};
 
 /*─────────────────────────────────────────────────────────────*
  | 5.  Custom (single entry‑point)                             |

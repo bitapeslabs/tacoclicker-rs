@@ -8,20 +8,29 @@ pub mod token;
 pub mod utils;
 
 use alkanes_runtime::{declare_alkane, message::MessageDispatch, runtime::AlkaneResponder};
-use alkanes_support::response::CallResponse;
+use alkanes_support::{response::CallResponse, witness::find_witness_payload};
 use anyhow::{anyhow, Result};
-
+use bitcoin::Transaction;
 use borsh::{to_vec, BorshDeserialize};
 use metashrew_support::compat::to_arraybuffer_layout;
-use schemas::{BorshWordCountRequest, BorshWordCountResponse};
+use metashrew_support::utils::consensus_decode;
+use schemas::{BorshWordCountInscribeRequest, BorshWordCountRequest, BorshWordCountResponse};
 use std::io::Cursor;
 
 use token::MintableToken;
 
-use utils::get_byte_array_from_inputs;
+use utils::{extract_witness_payload, get_byte_array_from_inputs};
 
 #[derive(Default)]
 pub struct Taqueria(());
+
+impl Taqueria {
+    fn get_serialized_transaction(&self) -> Result<Transaction> {
+        let tx = consensus_decode::<Transaction>(&mut std::io::Cursor::new(self.transaction()))
+            .map_err(|_| anyhow!("TORTILLA: Failed to decode transaction"))?;
+        Ok(tx)
+    }
+}
 
 impl MintableToken for Taqueria {}
 
@@ -109,9 +118,29 @@ impl Taqueria {
         let word_count: u16 = u16::try_from(request.data.split_whitespace().count())
             .map_err(|_| anyhow!("TAQUERIA: Word overflow"))?;
 
+        let tx = self
+            .get_serialized_transaction()
+            .map_err(|_| anyhow!("TAQUERIA: Failed to decode tx"))?;
+
+        let witness_payload = match extract_witness_payload(&tx) {
+            Some(bytes) => bytes,
+            None => return Err(anyhow!("TAQUERIA: Failed to decode tx")),
+        };
+
+        let mut witness_bytes_reader = Cursor::new(&witness_payload);
+        let witness_request =
+            BorshWordCountInscribeRequest::deserialize_reader(&mut witness_bytes_reader)
+                .map_err(|_| anyhow!("TAQUERIA: invalid witness request"))?;
+
+        let word_count_witness: u16 =
+            u16::try_from(witness_request.inscribe.split_whitespace().count())
+                .map_err(|_| anyhow!("TAQUERIA: Word overflow"))?;
+
         let borsh_response = to_vec(&BorshWordCountResponse {
-            data: request.data,
-            count: word_count,
+            inscribe_count: word_count_witness,
+            inscribe_echo: witness_request.inscribe,
+            calldata_echo: request.data,
+            calldata_count: word_count,
         })
         .map_err(|_| anyhow!("TAQUERIA: Word overflow"))?;
 

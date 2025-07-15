@@ -6,6 +6,13 @@ pub struct BorshWordCountRequest {
 }
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub struct BorshWordCountResponse {
-    pub data: String,
-    pub count: u16,
+    pub calldata_echo: String,
+    pub inscribe_echo: String,
+    pub calldata_count: u16,
+    pub inscribe_count: u16,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
+pub struct BorshWordCountInscribeRequest {
+    pub inscribe: String,
 }

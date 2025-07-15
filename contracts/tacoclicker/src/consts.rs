@@ -1,5 +1,6 @@
 use bitcoin::Network;
 
+pub const TORTILLA_AIRDROP_PREMINE: u128 = 150_000_000_000_000;
 //15,000 TORTILLA per block with precision of 8
 pub const TORTILLA_PER_BLOCK: u128 = 1_500_000_000_000;
 

@@ -35,7 +35,17 @@ export const runSandbox = async (): Promise<boolean> => {
       )
     ).decodeTo("object");
 
-    logger.deepAssert(4, countResponse.count);
+    logger.info("Asserting contract state...");
+    logger.deepAssert(
+      {
+        calldata_echo: "I have four words",
+        inscribe_echo:
+          "I have a lot more than four words if you count all of these and I can do that because I am in an inscription and arent bound by the limits of opreturn anymore so that makes me happy",
+        calldata_count: 4,
+        inscribe_count: 39,
+      },
+      countResponse
+    );
 
     root.close();
     return true;

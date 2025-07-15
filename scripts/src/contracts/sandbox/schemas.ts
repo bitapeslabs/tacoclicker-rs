@@ -11,8 +11,10 @@ export const schemaInscribeWordCountRequest = BorshSchema.Struct({
 export type IWordCountRequest = BorshInfer<typeof schemaWordCountRequest>;
 
 export const schemaWordCountResponse = BorshSchema.Struct({
-  data: BorshSchema.String,
-  count: BorshSchema.u16,
+  calldata_echo: BorshSchema.String,
+  inscribe_echo: BorshSchema.String,
+  calldata_count: BorshSchema.u16,
+  inscribe_count: BorshSchema.u16,
 });
 
 export type IWordCountResponse = BorshInfer<typeof schemaWordCountResponse>;

@@ -1,3 +1,4 @@
+use alkanes_support::id::AlkaneId;
 use borsh::{BorshDeserialize, BorshSerialize};
 /*
     Schema alkaneid uses u32's which have a max value of 4b. This fits well into the constrains of BTC (for block and sequence value)
@@ -12,12 +13,35 @@ pub struct SchemaAlkaneId {
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
-pub struct SchemaTortillaConsts {
-    pub taqueria_factory_alkane_id: SchemaAlkaneId,
+pub struct SchemaTacoClickerInitializationParameters {
+    pub controlled_mint_factory: SchemaAlkaneId,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
+pub struct SchemaTacoClickerConsts {
+    pub controlled_mint_factory: SchemaAlkaneId,
+    pub tortilla_alkane_id: SchemaAlkaneId,
     pub salsa_alkane_id: SchemaAlkaneId,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub struct SchemaAlkaneList {
     pub alkanes: Vec<SchemaAlkaneId>,
+}
+
+impl From<SchemaAlkaneId> for AlkaneId {
+    fn from(value: SchemaAlkaneId) -> Self {
+        AlkaneId {
+            block: value.block.into(),
+            tx: value.tx.into(),
+        }
+    }
+}
+
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
+pub struct SchemaControlledMintInitializationParameters {
+    pub token_name: String,
+    pub token_symbol: String,
+    pub premine: u128,
+    pub cap: u128,
 }

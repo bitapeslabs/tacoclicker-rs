@@ -25,8 +25,14 @@ use std::io::Cursor;
 use std::sync::Arc;
 use token::MintableToken;
 
-use crate::schemas::{SchemaAlkaneId, SchemaAlkaneList, SchemaTortillaConsts};
-use crate::utils::{address_from_txout, bytes_to_u128_words, get_byte_array_from_inputs};
+use crate::consts::TORTILLA_AIRDROP_PREMINE;
+use crate::schemas::{
+    SchemaAlkaneId, SchemaAlkaneList, SchemaControlledMintInitializationParameters,
+    SchemaTacoClickerConsts, SchemaTacoClickerInitializationParameters,
+};
+use crate::utils::encoders::{address_from_txout, bytes_to_u128_words, get_byte_array_from_inputs};
+
+use crate::utils::encoders::decode_from_ctx;
 
 #[derive(Default)]
 pub struct Tortilla(());
@@ -39,11 +45,11 @@ impl Tortilla {
         StoragePointer::from_keyword("/consts")
     }
 
-    fn get_consts_value(&self) -> Result<SchemaTortillaConsts> {
+    fn get_consts_value(&self) -> Result<SchemaTacoClickerConsts> {
         let bytes = (*self.get_consts_pointer().get()).clone();
         let mut bytes_reader = Cursor::new(&bytes);
 
-        SchemaTortillaConsts::deserialize_reader(&mut bytes_reader)
+        SchemaTacoClickerConsts::deserialize_reader(&mut bytes_reader)
             .map_err(|_| anyhow!("TORTILLA: Failed to deserialize consts"))
     }
 
@@ -97,35 +103,60 @@ enum TortillaMessage {
     #[returns(Vec<u8>)] //First AlkaneID that corresponds to a valid taqueria
     GetTaqueriaFromAlkaneList,
 
+    #[opcode(108)]
+    GetTortillaId,
+
+    #[opcode(109)]
+    GetSalsaId,
+
     #[opcode(1000)]
     #[returns(Vec<u8>)]
     GetData,
 }
 
 impl Tortilla {
-    //=====  STORAGE POINTER DEFS =====
-
-    //==================================
-
-    //===== chain helpers =====
     fn get_serialized_transaction(&self) -> Result<Transaction> {
         let tx = consensus_decode::<Transaction>(&mut std::io::Cursor::new(self.transaction()))
             .map_err(|_| anyhow!("TORTILLA: Failed to decode transaction"))?;
         Ok(tx)
     }
-    //==================================
 
     fn initialize(&self) -> Result<CallResponse> {
-        // Prevent multiple initializations
         self.observe_initialization()
             .map_err(|_| anyhow!("Contract already initialized"))?;
 
         let context = self.context()?;
         let response = CallResponse::forward(&context.incoming_alkanes);
 
-        let mut byte_reader = Cursor::new(get_byte_array_from_inputs(&context.inputs));
-        let consts = SchemaTortillaConsts::deserialize_reader(&mut byte_reader)
-            .map_err(|_| anyhow!("TORTILLA: Failed to decode initialization parameters"))?;
+        let init_params = decode_from_ctx!(context, SchemaTacoClickerInitializationParameters)?;
+
+        let tortilla_alkane_id = self.clone_at_target(
+            &response,
+            init_params.controlled_mint_factory.into(),
+            &SchemaControlledMintInitializationParameters {
+                token_name: "TAQUERIA".to_string(),
+                token_symbol: "TAQUERIA".to_string(),
+                premine: TORTILLA_AIRDROP_PREMINE,
+                cap: u128::MAX,
+            },
+        )?;
+
+        let salsa_alkane_id = self.clone_at_target(
+            &response,
+            init_params.controlled_mint_factory.into(),
+            &SchemaControlledMintInitializationParameters {
+                token_name: "TAQUERIA".to_string(),
+                token_symbol: "TAQUERIA".to_string(),
+                premine: 0u128,
+                cap: u128::MAX,
+            },
+        )?;
+
+        let consts = SchemaTacoClickerConsts {
+            controlled_mint_factory: init_params.controlled_mint_factory,
+            tortilla_alkane_id,
+            salsa_alkane_id,
+        };
 
         let consumed_bytes = borsh::to_vec(&consts)?;
         self.get_consts_pointer().set(Arc::new(consumed_bytes));
@@ -138,6 +169,28 @@ impl Tortilla {
         let mut response = CallResponse::forward(&context.incoming_alkanes);
 
         response.data = (*self.get_consts_pointer().get()).clone();
+
+        Ok(response)
+    }
+
+    fn get_tortilla_id(&self) -> Result<CallResponse> {
+        let context = self.context()?;
+        let mut response = CallResponse::forward(&context.incoming_alkanes);
+
+        let consts = self.get_consts_value()?;
+
+        response.data = borsh::to_vec(&consts.tortilla_alkane_id)?;
+
+        Ok(response)
+    }
+
+    fn get_salsa_id(&self) -> Result<CallResponse> {
+        let context = self.context()?;
+        let mut response = CallResponse::forward(&context.incoming_alkanes);
+
+        let consts = self.get_consts_value()?;
+
+        response.data = borsh::to_vec(&consts.salsa_alkane_id)?;
 
         Ok(response)
     }
@@ -169,51 +222,16 @@ impl Tortilla {
             .get_consts_value()
             .context("TORTILLA: failed to fetch on-chain consts")?;
 
-        let seq = self.sequence(); // capture once for logging
-        let next_alkane = SchemaAlkaneId {
-            block: 2u32,
-            tx: seq
-                .try_into()
-                .map_err(|_| anyhow!("TORTILLA: sequence {} overflows target integer", seq))?,
-        };
-
-        let pointer_id = SchemaAlkaneId {
-            block: context.myself.block.try_into().map_err(|_| {
-                anyhow!(
-                    "TORTILLA: context.myself.block {} does not fit into u32",
-                    context.myself.block
-                )
-            })?,
-            tx: context.myself.tx.try_into().map_err(|_| {
-                anyhow!(
-                    "TORTILLA: context.myself.block {} does not fit into u32",
-                    context.myself.block
-                )
-            })?,
-        };
-
-        let pointer_bytes =
-            borsh::to_vec(&pointer_id).context("TORTILLA: failed to Borsh-serialize pointer_id")?;
-
-        let mut calldata: Vec<u128> = vec![0u128];
-        calldata.extend_from_slice(&bytes_to_u128_words(&pointer_bytes));
-
-        let cellpack = Cellpack {
-            target: AlkaneId {
-                block: 5u128, // clone 2,n to 2,sequence
-                tx: consts.taqueria_factory_alkane_id.tx.into(),
+        let next_alkane = self.clone_at_target(
+            &response,
+            consts.controlled_mint_factory.into(),
+            &SchemaControlledMintInitializationParameters {
+                token_name: "TAQUERIA".to_string(),
+                token_symbol: "TAQUERIA".to_string(),
+                premine: 1u128,
+                cap: 1u128,
             },
-            inputs: calldata,
-        };
-
-        self.call(&cellpack, &response.alkanes, self.fuel())
-            .map_err(|err| {
-                anyhow!(
-                    "TORTILLA: failed to clone taqueria factory @ 2,{}: {}",
-                    consts.taqueria_factory_alkane_id.tx,
-                    err
-                )
-            })?;
+        )?;
 
         self.get_taquerias_pointer(&next_alkane)
             .context("TORTILLA: could not get taqueria pointer")?
@@ -238,13 +256,8 @@ impl Tortilla {
         let context = self.context()?;
         let mut response = CallResponse::forward(&context.incoming_alkanes);
 
-        let mut byte_reader = Cursor::new(get_byte_array_from_inputs(&context.inputs));
-
         //Just one thing is passed to taqueria init, and that is the tortilla contract
-        let alkane_list = SchemaAlkaneList::deserialize_reader(&mut byte_reader)
-            .map_err(|_| anyhow!("TAQUERIA: Failed to decode parameters"))?
-            .alkanes;
-
+        let alkane_list = decode_from_ctx!(context, SchemaAlkaneList)?.alkanes;
         let found_alkanes: Vec<SchemaAlkaneId> = alkane_list
             .iter()
             .filter_map(|taqueria| match self.get_taquerias_pointer(taqueria) {

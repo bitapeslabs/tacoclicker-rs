@@ -6,39 +6,48 @@ import { walletSigner } from "@/crypto/wallet";
 import { taskLogger as logger } from "@/consts";
 import { consumeAll, consumeOrThrow } from "@/boxed";
 
-const readableAlkaneId = (id: AlkaneId) => `(block→${Number(id.block)}n : tx→${Number(id.tx)}n)`;
+const readableAlkaneId = (id: AlkaneId) =>
+  `(block→${Number(id.block)}n : tx→${Number(id.tx)}n)`;
 
 /** Deploy, initialise and mint a Free-Mint token contract. */
-export const runFreeMint = async (enableDeploy?: boolean): Promise<boolean> => {
+export const runFreeMint = async (): Promise<boolean> => {
   const root = logger.start("deploy & inspect free-mint token");
-  enableDeploy = enableDeploy ?? true;
 
   try {
-    const freeMintId = enableDeploy
-      ? await deployContract(
-          path.join(__dirname, "../..", "./contracts/free-mint"),
-          [100n] // view-method quirk
-        )
-      : ({
-          block: 2n,
-          tx: 75n,
-        } as AlkaneId);
-
+    const freeMintId = {
+      block: 2n,
+      tx: 122n,
+    };
     logger.success(`contract at ${readableAlkaneId(freeMintId)}`);
 
-    const tokenContract = new TokenContract(provider, freeMintId, walletSigner.signPsbt);
+    const tokenContract = new TokenContract(
+      provider,
+      freeMintId,
+      walletSigner.signPsbt
+    );
 
     consumeOrThrow(
       await logger.progressExecute(
         "initialize",
         tokenContract.initialize({
           address: walletSigner.address,
-          tokenParams: { name: "test", symbol: "TEST", valuePerMint: 10n, cap: 1000n, premine: 10_000n },
+          tokenParams: {
+            name: "test",
+            symbol: "TEST",
+            valuePerMint: 10n,
+            cap: 1000n,
+            premine: 10_000n,
+          },
         })
       )
     );
 
-    consumeOrThrow(await logger.progressExecute("mint", tokenContract.mintTokens(walletSigner.address)));
+    consumeOrThrow(
+      await logger.progressExecute(
+        "mint",
+        tokenContract.mintTokens(walletSigner.address)
+      )
+    );
 
     await logger.info("Getting contract state…");
 
@@ -69,7 +78,8 @@ export const runFreeMint = async (enableDeploy?: boolean): Promise<boolean> => {
     );
     logger.success("All asserts passed. Contract state asserted successfully.");
 
-    const [name, symbol, totalSupply, valuePerMint, minted, cap] = tokenContractReturnValues;
+    const [name, symbol, totalSupply, valuePerMint, minted, cap] =
+      tokenContractReturnValues;
 
     logger.info(`name:          ${name}`);
     logger.info(`symbol:        ${symbol}`);

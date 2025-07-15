@@ -1,4 +1,4 @@
-import path from "path";
+/*import path from "path";
 import { deployContract } from "@/libs/utils";
 import { AlkaneId } from "tacoclicker-sdk";
 import { TortillaContract } from "@/contracts/tortilla";
@@ -197,3 +197,4 @@ export const runTacoClicker = async (
     process.exit(1);
   }
 };
+*/

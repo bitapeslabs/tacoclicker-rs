@@ -5,8 +5,11 @@ pub struct SchemaAlkaneId {
     pub block: u32,
     pub tx: u64,
 }
+
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
-pub struct SchemaTortillaConsts {
-    pub taqueria_factory_alkane_id: SchemaAlkaneId,
-    pub salsa_alkane_id: SchemaAlkaneId,
+pub struct SchemaControlledMintInitializationParameters {
+    pub token_name: String,
+    pub token_symbol: String,
+    pub premine: u128,
+    pub cap: u128,
 }

@@ -1,4 +1,4 @@
-import {
+/*import {
   BoxedResponse,
   BoxedSuccess,
   BoxedError,
@@ -230,3 +230,4 @@ export class TortillaContract extends BaseTokenContract {
     }
   }
 }
+*/

@@ -4,6 +4,7 @@
 import { BoxedResponse, BoxedSuccess, BoxedError } from "@/boxed";
 import { borshSerialize, BorshSchema } from "borsher";
 import { Expand } from "@/utils";
+import { bigint } from "zod";
 
 /*------------------------------------------------------------*
  | 1.  low-level helpers                                       |
@@ -57,6 +58,7 @@ export enum EncodeError {
 export interface EncoderFns<Obj> {
   string: (data: unknown) => BoxedResponse<bigint[], EncodeError>;
   name: (data: unknown) => BoxedResponse<bigint[], EncodeError>;
+  bigint: (data: unknown) => BoxedResponse<bigint[], EncodeError>;
   char: (data: unknown) => BoxedResponse<bigint[], EncodeError>;
   object: (data: unknown, schema?: BorshSchema<Obj>) => BoxedResponse<bigint[], EncodeError>;
 }
@@ -77,6 +79,13 @@ export class Encodable<T = unknown> {
           return new BoxedError(EncodeError.InvalidPayload, "Payload must be a string");
         }
         return new BoxedSuccess(encodeStringToU128Array(data));
+      },
+
+      bigint: (data) => {
+        if (typeof data !== "bigint") {
+          return new BoxedError(EncodeError.InvalidPayload, "Payload must be a bigint");
+        }
+        return new BoxedSuccess([data]);
       },
 
       name: (data) => {

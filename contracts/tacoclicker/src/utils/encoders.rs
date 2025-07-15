@@ -1,5 +1,8 @@
 use crate::consts::DEPLOYMENT_NETWORK;
+use anyhow::{anyhow, Result};
 use bitcoin::{Address, TxOut};
+use borsh::BorshDeserialize;
+use std::io::Cursor; // or `borsher::BorshDeserialize` if you re‑export it
 
 pub fn u128_to_string(v: u128) -> String {
     String::from_utf8(
@@ -24,9 +27,7 @@ pub fn bytes_to_u128_words(bytes: &[u8]) -> Vec<u128> {
     }
     out
 }
-//Does not consume inputs so context retains control
 pub fn get_byte_array_from_inputs(inputs: &[u128]) -> Vec<u8> {
-    // skip(1) leaves the original Vec untouched and avoids an O(n) remove
     inputs
         .iter()
         .skip(1)
@@ -39,3 +40,23 @@ pub fn address_from_txout(output: &TxOut) -> String {
         Err(_) => String::new(),
     }
 }
+
+macro_rules! decode_from_ctx {
+    ($ctx:expr, $ty:ty) => {{
+        use std::io::Cursor;
+        let mut rdr = Cursor::new(get_byte_array_from_inputs(&$ctx.inputs));
+        <$ty>::deserialize_reader(&mut rdr)
+            .map_err(|_| ::anyhow::anyhow!("TORTILLA: failed to decode {}", stringify!($ty)))
+    }};
+}
+macro_rules! decode_from_vec {
+    ($bytes:expr, $ty:ty) => {{
+        use std::io::Cursor;
+        // Accept anything that turns into a byte slice; `&Vec<u8>` or `&[u8]` both work.
+        let mut rdr = Cursor::new(&$bytes[..]);
+        <$ty>::deserialize_reader(&mut rdr)
+            .map_err(|_| ::anyhow::anyhow!("TORTILLA: failed to decode {}", stringify!($ty)))
+    }};
+}
+// Allow other modules in the same crate to `use` it:
+pub(crate) use {decode_from_ctx, decode_from_vec};

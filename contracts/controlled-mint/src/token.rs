@@ -9,16 +9,32 @@ use alkanes_support::{
 use anyhow::{anyhow, Result};
 use bitcoin::hashes::Hash;
 use bitcoin::Txid;
+use borsh::BorshDeserialize;
 use metashrew_support::index_pointer::KeyValuePointer;
+use std::io::Cursor;
+use std::u128;
 
-use crate::consts::{TOKEN_NAME, TOKEN_SYMBOL};
+use crate::schemas::SchemaControlledMintInitializationParameters;
 
 pub trait MintableToken: AlkaneResponder {
-    fn name(&self) -> String {
-        TOKEN_NAME.to_string()
+    fn get_consts_pointer(&self) -> StoragePointer {
+        StoragePointer::from_keyword("/consts")
     }
-    fn symbol(&self) -> String {
-        TOKEN_SYMBOL.to_string()
+
+    fn get_consts(&self) -> Result<SchemaControlledMintInitializationParameters> {
+        let consts_bytes = (*self.get_consts_pointer().get()).clone();
+        let mut byte_reader = Cursor::new(&consts_bytes);
+        let consts =
+            SchemaControlledMintInitializationParameters::deserialize_reader(&mut byte_reader)
+                .map_err(|_| anyhow!("TORTILLA: Failed to decode owner at get_owner_id"))?;
+        Ok(consts)
+    }
+
+    fn name(&self) -> Result<String> {
+        Ok(self.get_consts()?.token_name)
+    }
+    fn symbol(&self) -> Result<String> {
+        Ok(self.get_consts()?.token_symbol)
     }
 
     fn total_supply_pointer(&self) -> StoragePointer {
@@ -67,7 +83,7 @@ pub trait MintableToken: AlkaneResponder {
         0
     }
     fn cap(&self) -> u128 {
-        1u128
+        u128::MAX
     }
 
     fn has_tx_hash(&self, txid: &Txid) -> bool {
@@ -90,13 +106,13 @@ pub trait MintableToken: AlkaneResponder {
     fn get_name(&self) -> Result<CallResponse> {
         let ctx = self.context()?;
         let mut rsp = CallResponse::forward(&ctx.incoming_alkanes);
-        rsp.data = self.name().into_bytes();
+        rsp.data = self.name()?.into_bytes();
         Ok(rsp)
     }
     fn get_symbol(&self) -> Result<CallResponse> {
         let ctx = self.context()?;
         let mut rsp = CallResponse::forward(&ctx.incoming_alkanes);
-        rsp.data = self.symbol().into_bytes();
+        rsp.data = self.symbol()?.into_bytes();
         Ok(rsp)
     }
     fn get_total_supply(&self) -> Result<CallResponse> {
