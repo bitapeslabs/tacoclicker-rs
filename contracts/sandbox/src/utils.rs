@@ -1,6 +1,5 @@
 use alkanes_support::witness::find_witness_payload;
-use bitcoin::{consensus::deserialize, Transaction};
-use hex;
+use bitcoin::Transaction;
 
 pub fn u128_to_string(v: u128) -> String {
     String::from_utf8(

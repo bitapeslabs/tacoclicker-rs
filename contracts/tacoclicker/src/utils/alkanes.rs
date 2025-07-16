@@ -1,5 +1,5 @@
 use crate::{schemas::SchemaAlkaneId, utils::encoders::bytes_to_u128_words, Tortilla};
-use alkanes_runtime::{declare_alkane, message::MessageDispatch, runtime::AlkaneResponder};
+use alkanes_runtime::runtime::AlkaneResponder;
 use alkanes_support::id::AlkaneId;
 use alkanes_support::{cellpack::Cellpack, response::CallResponse};
 use anyhow::{anyhow, Context, Result};
@@ -9,10 +9,8 @@ impl Tortilla {
     pub fn clone_at_target<P>(
         &self,
         response: &CallResponse,
-
-        target: AlkaneId, // where to clone
-
-        payload: &P, // any struct/enum that impls `BorshSerialize`
+        target: AlkaneId,
+        payload: &P,
     ) -> Result<SchemaAlkaneId>
     where
         P: BorshSerialize,
@@ -52,5 +50,28 @@ impl Tortilla {
             })?;
 
         Ok(next_alkane)
+    }
+
+    pub fn controlled_mint_contract_mint_new(
+        &self,
+        response: &CallResponse,
+        target: AlkaneId,
+        amount: u128,
+    ) -> Result<()> {
+        let cellpack = Cellpack {
+            target: target,
+            inputs: vec![106u128, amount],
+        };
+
+        self.call(&cellpack, &response.alkanes, self.fuel())
+            .map_err(|e| {
+                anyhow!(
+                    "TORTILLA: failed to clone alkane @ {},{} → {e}",
+                    target.block,
+                    target.tx
+                )
+            })?;
+
+        Ok(())
     }
 }

@@ -1,8 +1,11 @@
 use bitcoin::Network;
-
+//1.5m
 pub const TORTILLA_AIRDROP_PREMINE: u128 = 150_000_000_000_000;
 //15,000 TORTILLA per block with precision of 8
 pub const TORTILLA_PER_BLOCK: u128 = 1_500_000_000_000;
+
+//every 144 blocks, someone will win 216,000 tortilla... 10% of the ENTIRE DAILY tortilla production of the game.
+pub const SALSA_BLOCK_REWARD: u128 = 21_600_000_000_000;
 
 //Amount people must pay to funding address to register
 pub const FUNDING_PRICE_SATS: u64 = 21_000;

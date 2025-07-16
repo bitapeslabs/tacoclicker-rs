@@ -8,7 +8,7 @@ pub mod token;
 pub mod utils;
 
 use alkanes_runtime::{declare_alkane, message::MessageDispatch, runtime::AlkaneResponder};
-use alkanes_support::{response::CallResponse, witness::find_witness_payload};
+use alkanes_support::response::CallResponse;
 use anyhow::{anyhow, Result};
 use bitcoin::Transaction;
 use borsh::{to_vec, BorshDeserialize};

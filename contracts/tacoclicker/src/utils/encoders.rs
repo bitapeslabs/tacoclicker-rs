@@ -1,8 +1,5 @@
 use crate::consts::DEPLOYMENT_NETWORK;
-use anyhow::{anyhow, Result};
 use bitcoin::{Address, TxOut};
-use borsh::BorshDeserialize;
-use std::io::Cursor; // or `borsher::BorshDeserialize` if you re‑export it
 
 pub fn u128_to_string(v: u128) -> String {
     String::from_utf8(

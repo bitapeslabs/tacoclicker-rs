@@ -21,7 +21,6 @@ pub struct SchemaTacoClickerInitializationParameters {
 pub struct SchemaTacoClickerConsts {
     pub controlled_mint_factory: SchemaAlkaneId,
     pub tortilla_alkane_id: SchemaAlkaneId,
-    pub salsa_alkane_id: SchemaAlkaneId,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
