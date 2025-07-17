@@ -159,9 +159,11 @@ impl MerkleDistributor {
         let amount_passed_in =
             self.collapse_transfers_for_alkane(params.alkane_id, &mut response)?;
 
+        let amount_expected = params.amount;
+
         ensure!(
-            amount_passed_in > params.amount,
-            "MERKLE DISTRIBUTOR: Attempted to start merkle distributor contract with an amount greater than what was present in alkane transfers"
+            amount_passed_in >= params.amount,
+            "MERKLE DISTRIBUTOR: Attempted to start merkle distributor contract with an amount greater than what was present in alkane transfers. Passed in: {amount_passed_in}. Expected: {amount_expected}"
         );
 
         let refund_amount = amount_passed_in.saturating_sub(params.amount);

@@ -125,9 +125,9 @@ impl Tortilla {
                 amount: 0u128,
                 next_price: UPGRADES.tortilla_factory.base_cost,
             },
-            taco_bank: SchemaUserUpgradesEntry {
+            taco_submarine: SchemaUserUpgradesEntry {
                 amount: 0u128,
-                next_price: UPGRADES.taco_bank.base_cost,
+                next_price: UPGRADES.taco_submarine.base_cost,
             },
             taco_pyramid: SchemaUserUpgradesEntry {
                 amount: 0u128,

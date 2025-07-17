@@ -15,12 +15,15 @@ pub struct SchemaAlkaneId {
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub struct SchemaTacoClickerInitializationParameters {
     pub controlled_mint_factory: SchemaAlkaneId,
+    pub merkle_distributor_factory: SchemaAlkaneId,
+    pub merkle_root_id: u8,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub struct SchemaTacoClickerConsts {
     pub controlled_mint_factory: SchemaAlkaneId,
     pub tortilla_alkane_id: SchemaAlkaneId,
+    pub merkle_distributor_alkane_id: SchemaAlkaneId,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
@@ -43,4 +46,11 @@ pub struct SchemaControlledMintInitializationParameters {
     pub token_symbol: String,
     pub premine: u128,
     pub cap: u128,
+}
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
+pub struct SchemaInitializeMerkleDistributorParameters {
+    pub merkle_root: Vec<u8>,
+    pub alkane_id: SchemaAlkaneId,
+    pub amount: u128,
+    pub block_end: u128,
 }

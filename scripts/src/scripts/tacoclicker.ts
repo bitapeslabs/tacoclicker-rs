@@ -32,6 +32,7 @@ import { TacoClickerContract } from "@/contracts/tacoclicker";
 import { walletSigner } from "@/crypto/wallet";
 import { deployContract } from "@/libs/utils";
 import crypto from "crypto";
+import { MerkleDistributorContract } from "@/contracts/merkledistributor";
 /*─────────────────────────────────────────────────────────────*
  |  Constants & helpers                                         |
  *─────────────────────────────────────────────────────────────*/
@@ -158,6 +159,7 @@ async function getContracts(enableDeploy = true) {
     return {
       controlledMintFactory: { block: 2n, tx: 146n } as AlkaneId,
       tacoClickerAlkaneId: { block: 2n, tx: 147n } as AlkaneId,
+      merkleDistributorFactory: { block: 2n, tx: 148n } as AlkaneId,
     };
   }
 
@@ -171,13 +173,25 @@ async function getContracts(enableDeploy = true) {
     `Controlled‑Mint at ${readableAlkaneId(controlledMintFactory)}`
   );
 
+  const merkleDistributorFactory = await deployContract(
+    path.join(__dirname, "../..", "./contracts/merkle-distributor"),
+    [100n]
+  );
+  logger.success(
+    `Merkle distributor at ${readableAlkaneId(merkleDistributorFactory)}`
+  );
+
   const tacoClickerAlkaneId = await deployContract(
     path.join(__dirname, "../..", "./contracts/tacoclicker"),
     [100n]
   );
   logger.success(`Taco Clicker at ${readableAlkaneId(tacoClickerAlkaneId)}`);
 
-  return { controlledMintFactory, tacoClickerAlkaneId };
+  return {
+    controlledMintFactory,
+    tacoClickerAlkaneId,
+    merkleDistributorFactory,
+  };
 }
 
 /*─────────────────────────────────────────────────────────────*
@@ -395,6 +409,70 @@ async function testEmissionAndClaim(
   }
 }
 
+async function testAidropMerkleProof(
+  tc: TacoClickerContract,
+  merkleDistributorId: AlkaneId,
+  tortillaAlkaneId: AlkaneId
+): Promise<BoxedResponse<true, TestError>> {
+  try {
+    const merkleDistributor = new MerkleDistributorContract(
+      provider,
+      merkleDistributorId,
+      tc.signPsbt
+    );
+
+    const address = walletSigner.address;
+    const proof = consumeOrThrow(
+      await logger.progressAbstract(
+        "getMerkleProofForAddress",
+        merkleDistributor.getMerkleProofForAddress({
+          address,
+          slug: "regtest",
+        })
+      )
+    );
+
+    logger.success(`Merkle proof for ${address}: ${JSON.stringify(proof)}`);
+
+    const isValid = consumeOrThrow(
+      await logger.progressAbstract(
+        "getIsValidClaim",
+        merkleDistributor.getIsValidClaim(proof)
+      )
+    );
+
+    logger.deepAssert(1n, isValid);
+
+    consumeOrThrow(
+      await logger.progressExecute(
+        "claim",
+        merkleDistributor.claim(walletSigner.address, proof)
+      )
+    );
+
+    logger.success("Claimed tortilla airdrop successfully");
+
+    logger.info("Checking balance…");
+    const tortilla = new ControlledMintContract(
+      provider,
+      tortillaAlkaneId,
+      tc.signPsbt
+    );
+
+    const balance = consumeOrThrow(
+      await tortilla.getBalance(walletSigner.address)
+    );
+
+    logger.success(`Wallet tortilla balance: ${balance} TORTILLA`);
+
+    logger.deepAssert(108_000, balance);
+
+    return new BoxedSuccess(true);
+  } catch (e) {
+    return new BoxedError(TestError.Unknown, (e as Error).message);
+  }
+}
+
 /*
 async function testBetOnBlock(
   tc: TacoClickerContract,
@@ -436,9 +514,11 @@ async function testBetOnBlock(
 export async function runTacoClicker(enableDeploy = true): Promise<void> {
   const root = logger.start("Taco Clicker game‑logic test‑suite");
 
-  const { controlledMintFactory, tacoClickerAlkaneId } = await getContracts(
-    enableDeploy
-  );
+  const {
+    controlledMintFactory,
+    tacoClickerAlkaneId,
+    merkleDistributorFactory,
+  } = await getContracts(enableDeploy);
 
   const tc = new TacoClickerContract(
     provider,
@@ -454,6 +534,10 @@ export async function runTacoClicker(enableDeploy = true): Promise<void> {
           controlled_mint_factory: new ParsableAlkaneId(
             controlledMintFactory
           ).toSchemaAlkaneId(),
+          merkle_distributor_factory: new ParsableAlkaneId(
+            merkleDistributorFactory
+          ).toSchemaAlkaneId(),
+          merkle_root_id: await tc.getTortillaAirdropMerkleRoot("regtest"),
         })
       )
     );
@@ -479,6 +563,10 @@ export async function runTacoClicker(enableDeploy = true): Promise<void> {
     consumeOrThrow(await tc.getTortillaId())
   ).toAlkaneId();
 
+  const merkleDistributorId = new ParsableAlkaneId(
+    consumeOrThrow(await tc.getMerkleDistributorId())
+  ).toAlkaneId();
+
   await logger.progressAbstract(
     "Waiting for one block so the caller has 15000 tortilla unclaimed",
     provider.waitForBlocks(1)
@@ -486,6 +574,7 @@ export async function runTacoClicker(enableDeploy = true): Promise<void> {
 
   // ---- sequentially run tests ----
   const tests = [
+    () => testAidropMerkleProof(tc, merkleDistributorId, tortillaId),
     () => testInitialize(tc, controlledMintFactory),
     () => testAvailableUpgradesBase(tc),
     () => testEmissionAndClaim(tc, taqueriaId, tortillaId),

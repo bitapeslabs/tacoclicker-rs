@@ -1,9 +1,18 @@
 import util from "node:util"; // for readable logging … JSON.stringify can choke on circular refs
 
-import { BoxedError, BoxedResponse, BoxedSuccess, consumeOrThrow, IBoxedSuccess } from "@/boxed";
+import {
+  BoxedError,
+  BoxedResponse,
+  BoxedSuccess,
+  consumeOrThrow,
+  IBoxedSuccess,
+} from "@/boxed";
 import chalk from "chalk";
 import ora, { Ora, spinners } from "ora";
-import { AlkanesExecuteError, AlkanesPushExecuteResponse } from "tacoclicker-sdk";
+import {
+  AlkanesExecuteError,
+  AlkanesPushExecuteResponse,
+} from "tacoclicker-sdk";
 
 const G = { branch: "├─ ", last: "└─ ", vert: "│  ", blank: "   " };
 
@@ -32,7 +41,9 @@ export class TaskLogger {
     this.frames.pop();
     if (this.frames.length) this.frames[this.frames.length - 1].last = true;
     if (this.frames.length === 0) {
-      console.log(chalk.cyan(this.prefix() + "└─▶ Finished All Tasks - ALKATERRIFIC!"));
+      console.log(
+        chalk.cyan(this.prefix() + "└─▶ Finished All Tasks - ALKATERRIFIC!")
+      );
     }
   }
 
@@ -70,7 +81,10 @@ export class TaskLogger {
     console.log(this.prefix(true) + chalk.yellow("! " + msg));
   }
   error(msg: string | Error) {
-    console.error(this.prefix(true) + chalk.red("✗ " + (msg instanceof Error ? msg.message : msg)));
+    console.error(
+      this.prefix(true) +
+        chalk.red("✗ " + (msg instanceof Error ? msg.message : msg))
+    );
   }
 
   progress(msg: string): Ora {
@@ -83,12 +97,17 @@ export class TaskLogger {
 
   async progressExecute<T>(
     functionName: string,
-    executeResponse: Promise<BoxedResponse<AlkanesPushExecuteResponse<T | never>, AlkanesExecuteError>>
+    executeResponse: Promise<
+      BoxedResponse<AlkanesPushExecuteResponse<T | never>, AlkanesExecuteError>
+    >
 
     //iliketurtles
   ): Promise<
     BoxedResponse<
-      Extract<Awaited<ReturnType<AlkanesPushExecuteResponse<T>["waitForResult"]>>, IBoxedSuccess<unknown>>["data"],
+      Extract<
+        Awaited<ReturnType<AlkanesPushExecuteResponse<T>["waitForResult"]>>,
+        IBoxedSuccess<unknown>
+      >["data"],
       LoggerError
     >
   > {
@@ -100,6 +119,7 @@ export class TaskLogger {
 
       spinner = this.progress(`waiting for ${functionName} trace…`);
       let res = consumeOrThrow(await waitForResult());
+
       spinner.succeed("Done.");
 
       return new BoxedSuccess(res);
@@ -107,13 +127,18 @@ export class TaskLogger {
       spinner.stop();
       console.error(error);
 
-      return new BoxedError(LoggerError.UnknownError, "Execution failed: " + (error as Error).message);
+      return new BoxedError(
+        LoggerError.UnknownError,
+        "Execution failed: " + (error as Error).message
+      );
     }
   }
 
   async progressAbstract<T>(
     functionName: string,
-    functionResponse: Promise<BoxedResponse<T, string>> | BoxedResponse<T, string>
+    functionResponse:
+      | Promise<BoxedResponse<T, string>>
+      | BoxedResponse<T, string>
   ): Promise<BoxedResponse<T, LoggerError>> {
     const spinner = this.progress(`executing ${functionName}…`);
     try {
@@ -124,7 +149,10 @@ export class TaskLogger {
       spinner.stop();
       console.error(error);
 
-      return new BoxedError(LoggerError.UnknownError, "Error during progressAbstract: " + (error as Error).message);
+      return new BoxedError(
+        LoggerError.UnknownError,
+        "Error during progressAbstract: " + (error as Error).message
+      );
     }
   }
 
@@ -143,13 +171,22 @@ export class TaskLogger {
     const repr = (v: unknown) => util.inspect(v, { depth: 1, colors: false });
 
     /* ─────────── primitive / null / undefined ─────────── */
-    if (typeof expected !== "object" || expected === null || typeof actual !== "object" || actual === null) {
+    if (
+      typeof expected !== "object" ||
+      expected === null ||
+      typeof actual !== "object" ||
+      actual === null
+    ) {
       if (expected === actual) {
-        this.success(`check passed (${here}): ${repr(expected)} === ${repr(actual)}`);
+        this.success(
+          `check passed (${here}): ${repr(expected)} === ${repr(actual)}`
+        );
         return;
       }
 
-      const msg = `Value mismatch at ${here}: expected ${repr(expected)}, got ${repr(actual)}`;
+      const msg = `Value mismatch at ${here}: expected ${repr(
+        expected
+      )}, got ${repr(actual)}`;
       if (warnEnabled) {
         this.warn(`(warning) ${msg}${reasonSuffix}`);
         return;
@@ -180,7 +217,9 @@ export class TaskLogger {
         throw new Error(`deepAssert failed at ${here}`);
       }
 
-      expected.forEach((expItem, i) => this.deepAssert(expItem, actual[i], [...path, `[${i}]`], warnReason));
+      expected.forEach((expItem, i) =>
+        this.deepAssert(expItem, actual[i], [...path, `[${i}]`], warnReason)
+      );
       return;
     }
 
@@ -191,8 +230,13 @@ export class TaskLogger {
     const expKeys = Object.keys(expObj);
     const actKeys = Object.keys(actObj);
 
-    if (expKeys.length !== actKeys.length || !expKeys.every((k) => actKeys.includes(k))) {
-      const msg = `Key mismatch at ${here}: expected keys ${repr(expKeys)}, got ${repr(actKeys)}`;
+    if (
+      expKeys.length !== actKeys.length ||
+      !expKeys.every((k) => actKeys.includes(k))
+    ) {
+      const msg = `Key mismatch at ${here}: expected keys ${repr(
+        expKeys
+      )}, got ${repr(actKeys)}`;
       if (warnEnabled) {
         this.warn(`(warning) ${msg}${reasonSuffix}`);
         return;

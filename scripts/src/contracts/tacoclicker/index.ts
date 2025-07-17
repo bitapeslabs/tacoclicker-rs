@@ -102,6 +102,21 @@ const TacoClickerABI = TokenABI.extend({
   claimTortilla: abi.opcode(118n).execute().returns("uint8Array"),
 
   register: abi.opcode(119n).execute().returns(schemaAlkaneId),
+
+  getMerkleDistributorId: abi.opcode(120n).view().returns(schemaAlkaneId),
+
+  getTortillaAirdropMerkleRoot: abi
+    .opcode(999n)
+    .custom(async function (
+      this: AlkanesBaseContract,
+      opcode: bigint,
+      slug?: "mainnet" | "regtest"
+    ): Promise<number> {
+      if (slug === "regtest") {
+        return 0;
+      }
+      return 1;
+    }),
 });
 
 export class TacoClickerContract extends abi.attach(

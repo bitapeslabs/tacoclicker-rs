@@ -14,7 +14,7 @@ use alkanes_support::id::AlkaneId;
 use alkanes_support::parcel::AlkaneTransfer;
 use alkanes_support::response::CallResponse;
 use anyhow::{anyhow, ensure, Context, Result};
-use bitcoin::{Block, Transaction};
+use bitcoin::Transaction;
 
 use borsh::BorshDeserialize;
 use consts::{FUNDING_ADDRESS, FUNDING_PRICE_SATS};
@@ -24,7 +24,9 @@ use metashrew_support::utils::consensus_decode;
 use std::sync::Arc;
 use token::MintableToken;
 
-use crate::consts::{TORTILLA_AIRDROP_PREMINE, TORTILLA_PER_BLOCK};
+use crate::consts::{
+    get_merkle_root_from_id, TORTILLA_AIRDROP_PREMINE, TORTILLA_CLAIM_WINDOW, TORTILLA_PER_BLOCK,
+};
 use crate::game::consts::UPGRADES;
 use crate::game::multipliers::{apply_multiplier, multiplier_from_seed};
 use crate::game::schemas::{
@@ -38,7 +40,8 @@ use crate::game::schemas::{
 use crate::game::utils::{get_upgrade_by_id, get_upgrade_entry_by_id, get_upgrade_entry_by_id_mut};
 use crate::schemas::{
     SchemaAlkaneId, SchemaAlkaneList, SchemaControlledMintInitializationParameters,
-    SchemaTacoClickerConsts, SchemaTacoClickerInitializationParameters,
+    SchemaInitializeMerkleDistributorParameters, SchemaTacoClickerConsts,
+    SchemaTacoClickerInitializationParameters,
 };
 use crate::utils::encoders::decode_from_ctx;
 use crate::utils::encoders::{address_from_txout, decode_from_vec, get_byte_array_from_inputs};
@@ -211,6 +214,9 @@ enum TortillaMessage {
     #[returns(Vec<u8>)]
     Register,
 
+    #[opcode(120)]
+    GetMerkleDistributorId,
+
     //#[opcode(118)]
     //ClaimTortillaAirdrop,
     #[opcode(1000)]
@@ -223,13 +229,6 @@ impl Tortilla {
         let tx = consensus_decode::<Transaction>(&mut std::io::Cursor::new(self.transaction()))
             .map_err(|_| anyhow!("TORTILLA: Failed to decode transaction"))?;
         Ok(tx)
-    }
-
-    fn get_serialized_block(&self) -> Result<Block> {
-        let block_bytes = self.block(); // assumes `self.block()` returns a `Vec<u8>`
-        let block = consensus_decode::<Block>(&mut std::io::Cursor::new(block_bytes))
-            .map_err(|_| anyhow!("TORTILLA: Failed to decode block"))?;
-        Ok(block)
     }
 
     pub fn blockhash(&self) -> Result<Vec<u8>> {
@@ -247,24 +246,42 @@ impl Tortilla {
             .map_err(|_| anyhow!("Contract already initialized"))?;
 
         let context = self.context()?;
-        let response = CallResponse::forward(&context.incoming_alkanes);
+        let mut response = CallResponse::forward(&context.incoming_alkanes);
 
         let init_params = decode_from_ctx!(context, SchemaTacoClickerInitializationParameters)?;
 
         let tortilla_alkane_id = self.clone_at_target(
-            &response,
+            &mut response,
             init_params.controlled_mint_factory.into(),
             &SchemaControlledMintInitializationParameters {
-                token_name: "TAQUERIA".to_string(),
-                token_symbol: "TAQUERIA".to_string(),
+                token_name: "TORTILLA".to_string(),
+                token_symbol: "TORTILLA".to_string(),
                 premine: TORTILLA_AIRDROP_PREMINE,
                 cap: u128::MAX,
+            },
+        )?;
+
+        //must bubble new tortilla to response buffer so merkle_distributor has access to it
+        response.alkanes.0.push(AlkaneTransfer {
+            id: tortilla_alkane_id.into(),
+            value: TORTILLA_AIRDROP_PREMINE,
+        });
+
+        let merkle_distributor_alkane_id = self.clone_at_target(
+            &mut response,
+            init_params.merkle_distributor_factory.into(),
+            &SchemaInitializeMerkleDistributorParameters {
+                merkle_root: get_merkle_root_from_id(init_params.merkle_root_id)?.to_vec(),
+                alkane_id: tortilla_alkane_id.into(),
+                amount: TORTILLA_AIRDROP_PREMINE,
+                block_end: self.height().saturating_add(TORTILLA_CLAIM_WINDOW).into(),
             },
         )?;
 
         let consts = SchemaTacoClickerConsts {
             controlled_mint_factory: init_params.controlled_mint_factory,
             tortilla_alkane_id,
+            merkle_distributor_alkane_id,
         };
 
         let consumed_bytes = borsh::to_vec(&consts)?;
@@ -311,6 +328,17 @@ impl Tortilla {
         let consts = self.get_consts_value()?;
 
         response.data = borsh::to_vec(&consts.tortilla_alkane_id)?;
+
+        Ok(response)
+    }
+
+    fn get_merkle_distributor_id(&self) -> Result<CallResponse> {
+        let context = self.context()?;
+        let mut response = CallResponse::forward(&context.incoming_alkanes);
+
+        let consts = self.get_consts_value()?;
+
+        response.data = borsh::to_vec(&consts.merkle_distributor_alkane_id)?;
 
         Ok(response)
     }
@@ -382,7 +410,7 @@ impl Tortilla {
             .context("TORTILLA: failed to fetch on-chain consts")?;
 
         let next_alkane = self.clone_at_target(
-            &response,
+            &mut response,
             consts.controlled_mint_factory.into(),
             &SchemaControlledMintInitializationParameters {
                 token_name: "TAQUERIA".to_string(),
@@ -678,10 +706,10 @@ impl Tortilla {
                 total_weight,
                 tortilla_per_block,
             ),
-            taco_bank: make_entry(
+            taco_submarine: make_entry(
                 UpgradeKind::TacoBank,
-                UPGRADES.taco_bank.weight,
-                UPGRADES.taco_bank.base_cost,
+                UPGRADES.taco_submarine.weight,
+                UPGRADES.taco_submarine.base_cost,
                 maybe_upgrades_view.as_ref(),
                 total_weight,
                 tortilla_per_block,

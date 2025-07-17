@@ -9,7 +9,7 @@ pub struct UpgradesSheetTable {
     pub salsa_bar: UpgradeSheetPriceEntry,
     pub tortilla_tree: UpgradeSheetPriceEntry,
     pub tortilla_factory: UpgradeSheetPriceEntry,
-    pub taco_bank: UpgradeSheetPriceEntry,
+    pub taco_submarine: UpgradeSheetPriceEntry,
     pub taco_pyramid: UpgradeSheetPriceEntry,
     pub tortilla_spaceship: UpgradeSheetPriceEntry,
     pub satoshi_tacomoto: UpgradeSheetPriceEntry,
@@ -40,7 +40,7 @@ pub const UPGRADES: UpgradesSheetTable = UpgradesSheetTable {
         base_cost: 15_000_000_000_000u128,
         weight: 2_400u128,
     },
-    taco_bank: UpgradeSheetPriceEntry {
+    taco_submarine: UpgradeSheetPriceEntry {
         id: 4,
         name: "Taco Bank",
         base_cost: 115_000_000_000_000u128,

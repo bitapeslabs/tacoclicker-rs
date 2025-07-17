@@ -130,7 +130,10 @@ impl ControlledMint {
         self.get_consts_pointer().set(Arc::new(consumed_bytes));
 
         // Mint initial tokens
-        response.alkanes.0.push(self.mint(&context, 1u128)?);
+        response
+            .alkanes
+            .0
+            .push(self.mint(&context, consts.premine)?);
 
         Ok(response)
     }

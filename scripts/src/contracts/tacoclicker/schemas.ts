@@ -3,11 +3,14 @@ import { BorshSchema, Infer as BorshInfer } from "borsher";
 
 export const schemaTacoClickerInitializeParams = BorshSchema.Struct({
   controlled_mint_factory: schemaAlkaneId,
+  merkle_distributor_factory: schemaAlkaneId,
+  merkle_root_id: BorshSchema.u8,
 });
 
 export const schemaTacoClickerConsts = BorshSchema.Struct({
   controlled_mint_factory: schemaAlkaneId,
   tortilla_alkane_id: schemaAlkaneId,
+  merkle_distributor_alkane_id: schemaAlkaneId,
 });
 
 export type IAlkaneId = BorshInfer<typeof schemaAlkaneId>;
@@ -53,7 +56,7 @@ export const schemaUserUpgradesView = BorshSchema.Struct({
   salsa_bar: schemaUserUpgradesEntry,
   tortilla_tree: schemaUserUpgradesEntry,
   tortilla_factory: schemaUserUpgradesEntry,
-  taco_bank: schemaUserUpgradesEntry,
+  taco_submarine: schemaUserUpgradesEntry,
   taco_pyramid: schemaUserUpgradesEntry,
   tortilla_spaceship: schemaUserUpgradesEntry,
   satoshi_tacomoto: schemaUserUpgradesEntry,
@@ -71,7 +74,7 @@ export const schemaUpgradesView = BorshSchema.Struct({
   salsa_bar: schemaUpgradesEntry,
   tortilla_tree: schemaUpgradesEntry,
   tortilla_factory: schemaUpgradesEntry,
-  taco_bank: schemaUpgradesEntry,
+  taco_submarine: schemaUpgradesEntry,
   taco_pyramid: schemaUpgradesEntry,
   tortilla_spaceship: schemaUpgradesEntry,
   satoshi_tacomoto: schemaUpgradesEntry,
