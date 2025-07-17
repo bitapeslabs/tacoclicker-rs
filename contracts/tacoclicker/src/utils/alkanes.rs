@@ -1,21 +1,22 @@
 use crate::{schemas::SchemaAlkaneId, utils::encoders::bytes_to_u128_words, Tortilla};
 use alkanes_runtime::runtime::AlkaneResponder;
 use alkanes_support::id::AlkaneId;
+use alkanes_support::parcel::AlkaneTransferParcel;
 use alkanes_support::{cellpack::Cellpack, response::CallResponse};
+
 use anyhow::{anyhow, Context, Result};
 use borsh::BorshSerialize;
 
 impl Tortilla {
     pub fn clone_at_target<P>(
         &self,
-        response: CallResponse,
+        alkanes: AlkaneTransferParcel,
         target: AlkaneId,
         payload: &P,
     ) -> Result<SchemaAlkaneId>
     where
         P: BorshSerialize,
     {
-        // 1. derive the “next” alkane ID from the sequence counter
         let seq = self.sequence();
         let next_alkane = SchemaAlkaneId {
             block: 2,
@@ -24,11 +25,10 @@ impl Tortilla {
                 .map_err(|_| anyhow!("TORTILLA: sequence {} overflows u32", seq))?,
         };
 
-        // 2. serialise the user payload → u128 words
         let payload_bytes =
             borsh::to_vec(payload).context("TORTILLA: failed to Borsh‑serialise payload")?;
 
-        let mut calldata: Vec<u128> = vec![0u128]; // selector / dummy word
+        let mut calldata: Vec<u128> = vec![0u128];
         calldata.extend_from_slice(&bytes_to_u128_words(&payload_bytes));
 
         let clone_target = AlkaneId {
@@ -40,14 +40,13 @@ impl Tortilla {
             inputs: calldata,
         };
 
-        self.call(&cellpack, &response.alkanes, self.fuel())
-            .map_err(|e| {
-                anyhow!(
-                    "TORTILLA: failed to clone alkane @ {},{} → {e}",
-                    clone_target.block,
-                    clone_target.tx
-                )
-            })?;
+        self.call(&cellpack, &alkanes, self.fuel()).map_err(|e| {
+            anyhow!(
+                "TORTILLA: failed to clone alkane @ {},{} → {e}",
+                clone_target.block,
+                clone_target.tx
+            )
+        })?;
 
         Ok(next_alkane)
     }
