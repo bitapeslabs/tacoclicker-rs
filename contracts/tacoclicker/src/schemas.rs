@@ -15,7 +15,6 @@ pub struct SchemaAlkaneId {
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
 pub struct SchemaTacoClickerInitializationParameters {
     pub controlled_mint_factory: SchemaAlkaneId,
-    pub merkle_distributor_factory: SchemaAlkaneId,
     pub merkle_root_id: u8,
 }
 
@@ -23,7 +22,8 @@ pub struct SchemaTacoClickerInitializationParameters {
 pub struct SchemaTacoClickerConsts {
     pub controlled_mint_factory: SchemaAlkaneId,
     pub tortilla_alkane_id: SchemaAlkaneId,
-    pub merkle_distributor_alkane_id: SchemaAlkaneId,
+    pub merkle_root_id: u8,
+    pub airdrop_end_height: u64,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]

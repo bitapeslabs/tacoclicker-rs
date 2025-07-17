@@ -27,6 +27,9 @@ import {
   schemaTacoClickerConsts,
   schemaGlobalState,
   schemaTaqueriaEmissionState,
+  IMerkleTree,
+  schemaMerkleProof,
+  IMerkleProof,
 } from "./schemas";
 
 import { Infer as BorshInfer } from "borsher";
@@ -40,7 +43,93 @@ import {
 import chalk from "chalk";
 import { ControlledMintContract } from "../controlledmint";
 
-const TacoClickerABI = TokenABI.extend({
+const strip0x = (h: string) => (h.startsWith("0x") ? h.slice(2) : h);
+
+enum FetchError {
+  UnknownError = "UnknownError",
+}
+
+const MERKLE_TREE_GITHUB_URL =
+  "https://raw.githubusercontent.com/bitapeslabs/tacoclicker-airdrop/refs/heads/main";
+
+async function getMerkleTree(
+  slug: "mainnet" | "regtest"
+): Promise<BoxedResponse<IMerkleTree, FetchError>> {
+  try {
+    const url = `${MERKLE_TREE_GITHUB_URL}/tortilla-airdrop-${slug}.json`;
+
+    const res = await fetch(url);
+
+    if (!res.ok) {
+      return new BoxedError(
+        FetchError.UnknownError,
+        `Failed to fetch Merkle tree from ${url}: ${res.statusText}`
+      );
+    }
+
+    const json = await res.json();
+
+    // Return the root as a hex string
+    return new BoxedSuccess(json as IMerkleTree);
+  } catch (e) {
+    return new BoxedError(
+      FetchError.UnknownError,
+      `Failed to fetch Merkle tree: ${
+        e instanceof Error ? e.message : String(e)
+      }`
+    );
+  }
+}
+
+const MerkleDistributorABI = TokenABI.extend({
+  getIsValidAirdropClaim: abi
+    .opcode(120n)
+    .view(schemaMerkleProof)
+    .returns("bigint"),
+  claimAirdrop: abi
+    .opcode(121n)
+    .execute(undefined, schemaMerkleProof)
+    .returns("uint8Array"),
+
+  getMerkleProofForAddress: abi.opcode(999n).custom(async function (
+    this: AlkanesBaseContract,
+    opcode,
+    params: {
+      address: string;
+      slug?: "mainnet" | "regtest";
+    }
+  ) {
+    try {
+      let merkleTree = consumeOrThrow(
+        await getMerkleTree(params.slug ?? "regtest")
+      );
+
+      if (!merkleTree[params.address]) {
+        return new BoxedError(
+          AlkanesSimulationError.UnknownError,
+          `No Merkle proof found for address ${params.address}`
+        );
+      }
+
+      const { leaf, proofs } = merkleTree[params.address];
+      const proof: IMerkleProof = {
+        leaf: Array.from(Buffer.from(strip0x(leaf), "hex")),
+        proofs: proofs.map((p) => Array.from(Buffer.from(strip0x(p), "hex"))),
+      };
+
+      return new BoxedSuccess(proof);
+    } catch (e) {
+      return new BoxedError(
+        AlkanesSimulationError.UnknownError,
+        `Failed to fetch Merkle tree: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
+    }
+  }),
+});
+
+const TacoClickerABI = MerkleDistributorABI.extend({
   initializeOverride: abi
     .opcode(0n)
     .execute(schemaTacoClickerInitializeParams)
@@ -102,8 +191,6 @@ const TacoClickerABI = TokenABI.extend({
   claimTortilla: abi.opcode(118n).execute().returns("uint8Array"),
 
   register: abi.opcode(119n).execute().returns(schemaAlkaneId),
-
-  getMerkleDistributorId: abi.opcode(120n).view().returns(schemaAlkaneId),
 
   getTortillaAirdropMerkleRoot: abi
     .opcode(999n)

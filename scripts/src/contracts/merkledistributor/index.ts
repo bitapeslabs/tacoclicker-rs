@@ -75,11 +75,6 @@ const MerkleDistributorABI = TokenABI.extend({
     .execute(undefined, schemaMerkleProof)
     .returns("uint8Array"),
 
-  getInitializationParams: abi
-    .opcode(107n)
-    .view()
-    .returns(schemaInitializeMerkleDistributorParameters),
-
   getMerkleProofForAddress: abi.opcode(999n).custom(async function (
     this: AlkanesBaseContract,
     opcode,

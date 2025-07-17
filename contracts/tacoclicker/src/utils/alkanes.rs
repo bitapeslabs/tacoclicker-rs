@@ -12,7 +12,8 @@ impl Tortilla {
         &self,
         alkanes: AlkaneTransferParcel,
         target: AlkaneId,
-        payload: &P,
+        opcode: u128,
+        payload: Option<&P>, // ← now optional
     ) -> Result<SchemaAlkaneId>
     where
         P: BorshSerialize,
@@ -25,11 +26,13 @@ impl Tortilla {
                 .map_err(|_| anyhow!("TORTILLA: sequence {} overflows u32", seq))?,
         };
 
-        let payload_bytes =
-            borsh::to_vec(payload).context("TORTILLA: failed to Borsh‑serialise payload")?;
+        let mut calldata: Vec<u128> = vec![opcode];
 
-        let mut calldata: Vec<u128> = vec![0u128];
-        calldata.extend_from_slice(&bytes_to_u128_words(&payload_bytes));
+        if let Some(payload) = payload {
+            let payload_bytes =
+                borsh::to_vec(payload).context("TORTILLA: failed to Borsh‑serialise payload")?;
+            calldata.extend_from_slice(&bytes_to_u128_words(&payload_bytes));
+        }
 
         let clone_target = AlkaneId {
             block: 5u128,

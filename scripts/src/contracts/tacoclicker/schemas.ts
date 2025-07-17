@@ -3,7 +3,6 @@ import { BorshSchema, Infer as BorshInfer } from "borsher";
 
 export const schemaTacoClickerInitializeParams = BorshSchema.Struct({
   controlled_mint_factory: schemaAlkaneId,
-  merkle_distributor_factory: schemaAlkaneId,
   merkle_root_id: BorshSchema.u8,
 });
 
@@ -147,3 +146,17 @@ export const schemaGlobalState = BorshSchema.Struct({
   emission_state: schemaGlobalEmissionState,
   salsa_state: schemaGlobalSalsaState,
 });
+
+export const schemaMerkleProof = BorshSchema.Struct({
+  leaf: BorshSchema.Vec(BorshSchema.u8),
+  proofs: BorshSchema.Vec(BorshSchema.Vec(BorshSchema.u8)),
+});
+
+export const schemaMerkleLeaf = BorshSchema.Struct({
+  address: BorshSchema.String,
+  amount: BorshSchema.u128,
+});
+export type IMerkleLeaf = BorshInfer<typeof schemaMerkleLeaf>;
+export type IMerkleProof = BorshInfer<typeof schemaMerkleProof>;
+
+export type IMerkleTree = Record<string, { leaf: string; proofs: string[] }>;

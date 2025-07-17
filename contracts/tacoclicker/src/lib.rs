@@ -2,6 +2,7 @@
 //!
 //! Created by mork1e
 
+pub mod airdrop;
 pub mod consts;
 pub mod game;
 pub mod schemas;
@@ -24,9 +25,7 @@ use metashrew_support::utils::consensus_decode;
 use std::sync::Arc;
 use token::MintableToken;
 
-use crate::consts::{
-    get_merkle_root_from_id, TORTILLA_AIRDROP_PREMINE, TORTILLA_CLAIM_WINDOW, TORTILLA_PER_BLOCK,
-};
+use crate::consts::{TORTILLA_CLAIM_WINDOW, TORTILLA_PER_BLOCK};
 use crate::game::consts::UPGRADES;
 use crate::game::multipliers::{apply_multiplier, multiplier_from_seed};
 use crate::game::schemas::{
@@ -40,8 +39,7 @@ use crate::game::schemas::{
 use crate::game::utils::{get_upgrade_by_id, get_upgrade_entry_by_id, get_upgrade_entry_by_id_mut};
 use crate::schemas::{
     SchemaAlkaneId, SchemaAlkaneList, SchemaControlledMintInitializationParameters,
-    SchemaInitializeMerkleDistributorParameters, SchemaTacoClickerConsts,
-    SchemaTacoClickerInitializationParameters,
+    SchemaTacoClickerConsts, SchemaTacoClickerInitializationParameters,
 };
 use crate::utils::encoders::decode_from_ctx;
 use crate::utils::encoders::{address_from_txout, decode_from_vec, get_byte_array_from_inputs};
@@ -215,10 +213,11 @@ enum TortillaMessage {
     Register,
 
     #[opcode(120)]
-    GetMerkleDistributorId,
+    GetIsValidAirdropClaim,
 
-    //#[opcode(118)]
-    //ClaimTortillaAirdrop,
+    #[opcode(121)]
+    ClaimAirdrop,
+
     #[opcode(1000)]
     #[returns(Vec<u8>)]
     GetData,
@@ -246,42 +245,27 @@ impl Tortilla {
             .map_err(|_| anyhow!("Contract already initialized"))?;
 
         let context = self.context()?;
-        let mut response = CallResponse::forward(&context.incoming_alkanes);
+        let response = CallResponse::forward(&context.incoming_alkanes);
 
         let init_params = decode_from_ctx!(context, SchemaTacoClickerInitializationParameters)?;
 
         let tortilla_alkane_id = self.clone_at_target(
             response.alkanes.clone(),
             init_params.controlled_mint_factory.into(),
-            &SchemaControlledMintInitializationParameters {
+            0u128,
+            Some(&SchemaControlledMintInitializationParameters {
                 token_name: "TORTILLA".to_string(),
                 token_symbol: "TORTILLA".to_string(),
-                premine: TORTILLA_AIRDROP_PREMINE,
+                premine: 0u128,
                 cap: u128::MAX,
-            },
-        )?;
-
-        //must bubble new tortilla to response buffer so merkle_distributor has access to it
-        response.alkanes.0.push(AlkaneTransfer {
-            id: tortilla_alkane_id.into(),
-            value: TORTILLA_AIRDROP_PREMINE,
-        });
-
-        let merkle_distributor_alkane_id = self.clone_at_target(
-            response.alkanes.clone(),
-            init_params.merkle_distributor_factory.into(),
-            &SchemaInitializeMerkleDistributorParameters {
-                merkle_root: get_merkle_root_from_id(init_params.merkle_root_id)?.to_vec(),
-                alkane_id: tortilla_alkane_id.into(),
-                amount: TORTILLA_AIRDROP_PREMINE,
-                block_end: self.height().saturating_add(TORTILLA_CLAIM_WINDOW).into(),
-            },
+            }),
         )?;
 
         let consts = SchemaTacoClickerConsts {
             controlled_mint_factory: init_params.controlled_mint_factory,
             tortilla_alkane_id,
-            merkle_distributor_alkane_id,
+            merkle_root_id: init_params.merkle_root_id,
+            airdrop_end_height: self.height() + TORTILLA_CLAIM_WINDOW,
         };
 
         let consumed_bytes = borsh::to_vec(&consts)?;
@@ -328,17 +312,6 @@ impl Tortilla {
         let consts = self.get_consts_value()?;
 
         response.data = borsh::to_vec(&consts.tortilla_alkane_id)?;
-
-        Ok(response)
-    }
-
-    fn get_merkle_distributor_id(&self) -> Result<CallResponse> {
-        let context = self.context()?;
-        let mut response = CallResponse::forward(&context.incoming_alkanes);
-
-        let consts = self.get_consts_value()?;
-
-        response.data = borsh::to_vec(&consts.merkle_distributor_alkane_id)?;
 
         Ok(response)
     }
@@ -412,12 +385,13 @@ impl Tortilla {
         let next_alkane = self.clone_at_target(
             response.alkanes.clone(),
             consts.controlled_mint_factory.into(),
-            &SchemaControlledMintInitializationParameters {
+            0u128,
+            Some(&SchemaControlledMintInitializationParameters {
                 token_name: "TAQUERIA".to_string(),
                 token_symbol: "TAQUERIA".to_string(),
                 premine: 1u128,
                 cap: 1u128,
-            },
+            }),
         )?;
 
         self.get_taquerias_pointer(&next_alkane)
