@@ -251,7 +251,7 @@ impl Tortilla {
         let init_params = decode_from_ctx!(context, SchemaTacoClickerInitializationParameters)?;
 
         let tortilla_alkane_id = self.clone_at_target(
-            &mut response,
+            response.clone(),
             init_params.controlled_mint_factory.into(),
             &SchemaControlledMintInitializationParameters {
                 token_name: "TORTILLA".to_string(),
@@ -268,7 +268,7 @@ impl Tortilla {
         });
 
         let merkle_distributor_alkane_id = self.clone_at_target(
-            &mut response,
+            response.clone(),
             init_params.merkle_distributor_factory.into(),
             &SchemaInitializeMerkleDistributorParameters {
                 merkle_root: get_merkle_root_from_id(init_params.merkle_root_id)?.to_vec(),
@@ -410,7 +410,7 @@ impl Tortilla {
             .context("TORTILLA: failed to fetch on-chain consts")?;
 
         let next_alkane = self.clone_at_target(
-            &mut response,
+            response.clone(),
             consts.controlled_mint_factory.into(),
             &SchemaControlledMintInitializationParameters {
                 token_name: "TAQUERIA".to_string(),

@@ -8,7 +8,7 @@ use borsh::BorshSerialize;
 impl Tortilla {
     pub fn clone_at_target<P>(
         &self,
-        response: &mut CallResponse,
+        response: CallResponse,
         target: AlkaneId,
         payload: &P,
     ) -> Result<SchemaAlkaneId>
@@ -40,7 +40,7 @@ impl Tortilla {
             inputs: calldata,
         };
 
-        self.call(&cellpack, &mut response.alkanes, self.fuel())
+        self.call(&cellpack, &response.alkanes, self.fuel())
             .map_err(|e| {
                 anyhow!(
                     "TORTILLA: failed to clone alkane @ {},{} → {e}",
