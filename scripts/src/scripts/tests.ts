@@ -1,18 +1,28 @@
 import { BoxedSuccess, consumeOrThrow } from "@/boxed";
 import { taskLogger as logger, provider } from "@/consts";
 import { walletSigner } from "@/crypto/wallet";
-import { abi, AlkanesBaseContract, SingularAlkanesTransfer } from "tacoclicker-sdk";
+import {
+  abi,
+  AlkanesBaseContract,
+  DecodableAlkanesResponse,
+  SingularAlkanesTransfer,
+} from "tacoclicker-sdk";
 import { BorshSchema } from "borsher";
+import { TacoClickerContract } from "@/contracts/tacoclicker";
+import { ParsableAlkaneId } from "tacoclicker-sdk";
+
 const myschema = BorshSchema.Struct({
   message: BorshSchema.String,
 });
 
 const MyContractABI = abi.contract({
-  mymethod: abi.opcode(0n).custom(async function (this, address, params: string) {
-    console.log("params passed in:", address, params);
-    // Custom logic here
-    return new BoxedSuccess("Custom method executed successfully");
-  }),
+  mymethod: abi
+    .opcode(0n)
+    .custom(async function (this, address, params: string) {
+      console.log("params passed in:", address, params);
+      // Custom logic here
+      return new BoxedSuccess("Custom method executed successfully");
+    }),
 
   theirmethod: abi.opcode(1n).execute(myschema).returns(myschema),
   inscribe: abi.opcode(2n).execute(undefined, myschema).returns("uint8Array"),
@@ -22,35 +32,33 @@ class MyContract extends abi.attach(AlkanesBaseContract, MyContractABI) {}
 
 export const runGeneralTest = async (): Promise<boolean> => {
   const root = logger.start("Running general test");
-  const contract = new MyContract(
+  const contract = new TacoClickerContract(
     provider,
     {
       block: 2n,
-      tx: 102n,
+      tx: 190n,
     },
     walletSigner.signPsbt
   );
 
   try {
-    const test = consumeOrThrow(
-      await contract.inscribe(
-        "asd",
-        { message: "please inscribe this" },
-        {
-          transfers: [
-            {
-              asset: {
-                block: 2n,
-                tx: 101n,
-              },
-              address: walletSigner.address,
-              amount: 10n,
-            } as SingularAlkanesTransfer,
-          ],
-        }
-      )
+    let taqueriaAlkane = consumeOrThrow(
+      await contract.getTaqueriaContractForAddress(walletSigner.address)
     );
-    console.log("Test method result:", test);
+
+    let response = consumeOrThrow(
+      await contract.getUnclaimedTortillaForTaqueria({
+        taqueria: new ParsableAlkaneId(
+          taqueriaAlkane.alkaneId
+        ).toSchemaAlkaneId(),
+      })
+    );
+
+    let unclaimed_amount = new DecodableAlkanesResponse(
+      response.unclaimed_tortilla
+    ).decodeTo("tokenValue");
+
+    console.log("Unclaimed Tortilla Response: ", unclaimed_amount);
 
     return true;
   } catch (error) {

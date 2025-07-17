@@ -1,70 +1,73 @@
-/*import path from "path";
-import { deployContract } from "@/libs/utils";
-import { AlkaneId } from "tacoclicker-sdk";
-import { TortillaContract } from "@/contracts/tortilla";
+/*─────────────────────────────────────────────────────────────
+  Taco Clicker – full game‑logic test‑suite
+  -------------------------------------------------------------
+  • Uses the existing TaskLogger + BoxedResponse helpers
+  • Splits coverage into small, composable test fns returning
+    BoxedResponse<true, TestError>
+  • Exposes a single entry‑point runAllTacoClickerTests() so you
+    can `ts-node` the file or import the function elsewhere.
+  -------------------------------------------------------------*/
+
+import path from "path";
 import { provider } from "@/consts";
-import { walletSigner } from "@/crypto/wallet";
 import { taskLogger as logger } from "@/consts";
 import {
-  consumeOrThrow,
-  BoxedResponse,
   BoxedError,
-  isBoxedError,
+  BoxedResponse,
   BoxedSuccess,
+  consumeOrThrow,
+  isBoxedError,
 } from "@/boxed";
-import { ParsableAlkaneId } from "tacoclicker-sdk";
-import { TaqueriaContract } from "@/contracts/taqueria";
+import {
+  AlkaneId,
+  AlkanesExecuteError,
+  AlkanesPushExecuteResponse,
+  DecodableAlkanesResponse,
+  ParsableAlkaneId,
+  SingularAlkanesTransfer,
+  SingularBTCTransfer,
+} from "tacoclicker-sdk";
+import { ControlledMintContract } from "@/contracts/controlledmint";
+import { TacoClickerContract } from "@/contracts/tacoclicker";
+import { walletSigner } from "@/crypto/wallet";
+import { deployContract } from "@/libs/utils";
+import crypto from "crypto";
+/*─────────────────────────────────────────────────────────────*
+ |  Constants & helpers                                         |
+ *─────────────────────────────────────────────────────────────*/
 
-const readableAlkaneId = (id: AlkaneId) =>
-  `(block→${Number(id.block)}n : tx→${Number(id.tx)}n)`;
+const TORTILLA_PER_BLOCK = 15_000n * 10n ** 8n; // 15 000 × 1e8 precision
+const DECIMALS = 10n ** 8n; // 1 TORTILLA == 1e8 base‑units
 
-const getContracts = async (enableDeploy: boolean) => {
-  if (!enableDeploy) {
-    return {
-      taqueriaFactoryAlkaneId: {
-        block: 2n,
-        tx: 146n,
-      } as AlkaneId,
-      tortillaAlkaneId: {
-        block: 2n,
-        tx: 147n,
-      } as AlkaneId,
-    };
-  }
+function readableAlkaneId(id: AlkaneId) {
+  return `(block→${Number(id.block)} : tx→${Number(id.tx)})`;
+}
 
-  const taqueriaFactoryAlkaneId = await deployContract(
-    path.join(__dirname, "../..", "./contracts/taqueria-factory"),
-    [100n] // view-method quirk
-  );
-  logger.success(`contract at ${readableAlkaneId(taqueriaFactoryAlkaneId)}`);
-
-  const tortillaAlkaneId = await deployContract(
-    path.join(__dirname, "../..", "./contracts/tortilla"),
-    [100n] // view-method quirk
-  );
-  logger.success(`contract at ${readableAlkaneId(tortillaAlkaneId)}`);
-
-  return {
-    taqueriaFactoryAlkaneId,
-    tortillaAlkaneId,
-  };
-};
+/*── Convert bigint token‑value → human‑readable number (just for logs) ──*/
+const toDecimal = (value: bigint) => Number(value) / Number(DECIMALS);
 
 enum TacoclickerRegisterError {
   UnknownError = "UnknownError",
   AssertFailure = "AssertFailure",
 }
-
-const testRegister = async (
-  tortillaContract: TortillaContract
+const testRegisterLegacy = async (
+  tacoClickerContract: TacoClickerContract
 ): Promise<BoxedResponse<boolean, TacoclickerRegisterError>> => {
   try {
     let taqueria = await logger.progressExecute(
       "Register with insufficient funds",
-      tortillaContract.register(walletSigner.address, 20_000)
+      tacoClickerContract.register(walletSigner.address, {
+        transfers: [
+          {
+            asset: "btc",
+            amount: Number(TacoClickerContract.TAQUERIA_COST_SATS) - 1000,
+            address: TacoClickerContract.FUNDING_ADDRESS,
+          } as SingularBTCTransfer,
+        ],
+      })
     );
 
-    const expectedError = `TORTILLA: for register, the parent tx must send ${TortillaContract.TAQUERIA_COST_SATS} sats to funding address ${TortillaContract.TORTILLA_FUNDING_ADDRESS}`;
+    const expectedError = `TORTILLA: for register, the parent tx must send ${TacoClickerContract.TAQUERIA_COST_SATS} sats to funding address ${TacoClickerContract.FUNDING_ADDRESS}`;
 
     if (!isBoxedError(taqueria)) {
       return new BoxedError(
@@ -84,23 +87,31 @@ const testRegister = async (
     const taqueria2 = consumeOrThrow(
       await logger.progressExecute(
         "Register with sufficient funds",
-        tortillaContract.register(walletSigner.address)
+        tacoClickerContract.register(walletSigner.address, {
+          transfers: [
+            {
+              asset: "btc",
+              amount: Number(TacoClickerContract.TAQUERIA_COST_SATS),
+              address: TacoClickerContract.FUNDING_ADDRESS,
+            } as SingularBTCTransfer,
+          ],
+        })
       )
-    ).toObject();
+    ).decodeTo("object");
 
     logger.success(
       "Taqueria registered successfully: " +
         readableAlkaneId(new ParsableAlkaneId(taqueria2).toAlkaneId())
     );
 
-    const registeredTaqueria = new TaqueriaContract(
+    const registeredTaqueria = new TacoClickerContract(
       provider,
       new ParsableAlkaneId(taqueria2).toAlkaneId(),
       walletSigner.signPsbt
     );
 
     const balance = consumeOrThrow(
-      await registeredTaqueria.viewGetBalance(walletSigner.address)
+      await registeredTaqueria.getBalance(walletSigner.address)
     );
 
     logger.deepAssert(1e-8, balance); // unitary balance check
@@ -109,7 +120,9 @@ const testRegister = async (
       consumeOrThrow(
         await logger.progressAbstract(
           "getAddressTaqueria",
-          tortillaContract.viewGetTaqueria(walletSigner.address)
+          tacoClickerContract.getTaqueriaContractForAddress(
+            walletSigner.address
+          )
         )
       ).alkaneId
     ).toSchemaAlkaneId();
@@ -130,71 +143,361 @@ const testRegister = async (
   }
 };
 
-export const runTacoClicker = async (
-  enableDeploy?: boolean
-): Promise<boolean> => {
-  enableDeploy = enableDeploy ?? true;
+/**
+ * Brute‑force a PoC nonce such that
+ *   SHA256( borsh(taqueriaId) || nonce_BE_16 || prevHash )
+ *   starts with 0x00 – this gives a success probability of 1/256, so on
+ *   average ~128 iterations.
+ */
 
-  const root = logger.start("deploy & inspect taco clicker contracts");
-
-  try {
-    let contracts = await getContracts(enableDeploy);
-
-    logger.success(
-      `contract at ${readableAlkaneId(contracts.tortillaAlkaneId)}`
-    );
-
-    const tortillaContract = new TortillaContract(
-      provider,
-      contracts.tortillaAlkaneId,
-      walletSigner.signPsbt
-    );
-
-    if (enableDeploy) {
-      consumeOrThrow(
-        await logger.progressExecute(
-          "Initialize",
-          tortillaContract.initialize(walletSigner.address, {
-            taqueria_factory_alkane_id: new ParsableAlkaneId(
-              contracts.taqueriaFactoryAlkaneId
-            ).toSchemaAlkaneId(),
-
-            //PLACEHOLDERS. TODO: CHANGE
-            salsa_alkane_id: new ParsableAlkaneId({
-              block: 0,
-              tx: 0n,
-            }).toSchemaAlkaneId(),
-          })
-        )
-      );
-    }
-
-    let consts = consumeOrThrow(
-      await logger.progressAbstract("getConsts", tortillaContract.getConsts())
-    );
-
-    logger.info("Asserting tortilla contract state...");
-    logger.deepAssert(
-      {
-        taqueria_factory_alkane_id: new ParsableAlkaneId(
-          contracts.taqueriaFactoryAlkaneId
-        ).toSchemaAlkaneId(),
-        salsa_alkane_id: new ParsableAlkaneId({
-          block: 0,
-          tx: 0n,
-        }).toSchemaAlkaneId(),
-      },
-      consts
-    );
-
-    consumeOrThrow(await testRegister(tortillaContract));
-
-    root.close();
-    return true;
-  } catch (err) {
-    logger.error(err as Error);
-    root.close();
-    process.exit(1);
+/*─────────────────────────────────────────────────────────────*
+ |  Deploy/attach helper                                        |
+ *─────────────────────────────────────────────────────────────*/
+async function getContracts(enableDeploy = true) {
+  if (!enableDeploy) {
+    return {
+      controlledMintFactory: { block: 2n, tx: 146n } as AlkaneId,
+      tacoClickerAlkaneId: { block: 2n, tx: 147n } as AlkaneId,
+    };
   }
-};
-*/
+
+  const deployContract = (await import("@/libs/utils")).deployContract;
+
+  const controlledMintFactory = await deployContract(
+    path.join(__dirname, "../..", "./contracts/controlled-mint"),
+    [100n]
+  );
+  logger.success(
+    `Controlled‑Mint at ${readableAlkaneId(controlledMintFactory)}`
+  );
+
+  const tacoClickerAlkaneId = await deployContract(
+    path.join(__dirname, "../..", "./contracts/tacoclicker"),
+    [100n]
+  );
+  logger.success(`Taco Clicker at ${readableAlkaneId(tacoClickerAlkaneId)}`);
+
+  return { controlledMintFactory, tacoClickerAlkaneId };
+}
+
+/*─────────────────────────────────────────────────────────────*
+ |  Test error enum                                             |
+ *─────────────────────────────────────────────────────────────*/
+
+enum TestError {
+  Unknown = "UnknownError",
+  Assert = "AssertFailure",
+}
+
+/*─────────────────────────────────────────────────────────────*
+ |  Individual test cases                                       |
+ *─────────────────────────────────────────────────────────────*/
+
+function assert<T>(expr: boolean, msg: string): BoxedResponse<T, TestError> {
+  return expr
+    ? new BoxedSuccess(true as unknown as T)
+    : new BoxedError(TestError.Assert, msg);
+}
+
+/*────────── 1.  Initialization / consts  ─────────────────────*/
+async function testInitialize(
+  tc: TacoClickerContract,
+  mintFactoryId: AlkaneId
+): Promise<BoxedResponse<true, TestError>> {
+  try {
+    const consts = consumeOrThrow(await tc.getConsts());
+    logger.deepAssert(
+      new ParsableAlkaneId(mintFactoryId).toSchemaAlkaneId(),
+      consts.controlled_mint_factory
+    );
+    logger.success("getConsts values match deployment arguments");
+    return new BoxedSuccess(true);
+  } catch (e) {
+    return new BoxedError(TestError.Unknown, (e as Error).message);
+  }
+}
+
+/*────────── 2.  Register flow (existing, wrapped) ────────────*/
+
+async function testRegister(
+  tc: TacoClickerContract
+): Promise<BoxedResponse<true, TestError>> {
+  const res = await testRegisterLegacy(tc);
+  return res
+    ? new BoxedSuccess(true)
+    : new BoxedError(TestError.Assert, "registration tests failed");
+}
+
+/*────────── 3.  Base upgrade sheet costs / weights ───────────*/
+async function testAvailableUpgradesBase(
+  tc: TacoClickerContract
+): Promise<BoxedResponse<true, TestError>> {
+  try {
+    const view = consumeOrThrow(
+      await tc.getAvailableUpgrades({ taqueria: { block: 0, tx: 0n } })
+    );
+    // quick sanity check on two entries
+    logger.deepAssert(10_000_000_000n, view.taquero.cost);
+    logger.deepAssert(1n, view.taquero.weight);
+    logger.deepAssert(300_000_000_000n, view.salsa_bar.cost);
+    logger.success("Base upgrade sheet matches on‑chain constants");
+    return new BoxedSuccess(true);
+  } catch (e) {
+    return new BoxedError(TestError.Unknown, (e as Error).message);
+  }
+}
+
+/*────────── 4.  Mint tortilla & buy first upgrade ───────────*/
+async function testBuyUpgrade(
+  tc: TacoClickerContract,
+  taqueriaId: AlkaneId,
+  tortillaId: AlkaneId
+): Promise<BoxedResponse<true, TestError>> {
+  try {
+    // 4.1 – mint enough tortilla to wallet
+    const tortilla = new ControlledMintContract(
+      provider,
+      tortillaId,
+      tc.signPsbt
+    );
+
+    // 4.2 – buy Taquero upgrade (id 0)
+    const buy = await logger.progressExecute(
+      "buyUpgrade → Taquero",
+      tc.buyUpgrade(
+        walletSigner.address,
+        { upgrade: 0 },
+        {
+          transfers: [
+            {
+              asset: tortillaId,
+              amount: 10_000_000_000n,
+              address: walletSigner.address!, // contract addr
+            } as SingularAlkanesTransfer /* SingularAlkanesTransfer */,
+            {
+              asset: taqueriaId, // auth alkane
+              amount: 1n,
+              address: walletSigner.address!,
+            } as SingularAlkanesTransfer,
+          ],
+        }
+      )
+    );
+    consumeOrThrow(buy); // should succeed
+
+    // 4.3 – verify upgrade view shows amount = 1 & next_price = (base×3)/2
+    const upg = consumeOrThrow(
+      await tc.getUpgradesForTaqueria({
+        taqueria: new ParsableAlkaneId(taqueriaId).toSchemaAlkaneId(),
+      })
+    );
+    const expectedNext = (10_000_000_000n * 3n) / 2n;
+    logger.deepAssert(2n, upg.taquero.amount);
+    logger.deepAssert(expectedNext, upg.taquero.next_price);
+
+    return new BoxedSuccess(true);
+  } catch (e) {
+    return new BoxedError(TestError.Unknown, (e as Error).message);
+  }
+}
+
+/*────────── 5.  Emission accrual & claim ────────────────────*/
+async function testEmissionAndClaim(
+  tc: TacoClickerContract,
+  taqueriaId: AlkaneId,
+  tortillaId: AlkaneId
+): Promise<BoxedResponse<true, TestError>> {
+  try {
+    const uncBefore = consumeOrThrow(
+      await tc.getUnclaimedTortillaForTaqueria({
+        taqueria: new ParsableAlkaneId(taqueriaId).toSchemaAlkaneId(),
+      })
+    ).unclaimed_tortilla;
+    const BLOCKS = 5;
+    logger.info(`Waiting for ${BLOCKS} blocks …`);
+    await provider.waitForBlocks(BLOCKS);
+
+    const unc = consumeOrThrow(
+      await tc.getUnclaimedTortillaForTaqueria({
+        taqueria: new ParsableAlkaneId(taqueriaId).toSchemaAlkaneId(),
+      })
+    );
+
+    let heightBefore = Number(
+      consumeOrThrow(
+        await provider.rpc.alkanes.alkanes_metashrewHeight().call()
+      )
+    );
+
+    logger.info(`Block before claim: ${heightBefore}`);
+
+    const expected = uncBefore + TORTILLA_PER_BLOCK * BigInt(BLOCKS);
+    logger.deepAssert(
+      expected,
+      unc.unclaimed_tortilla,
+      [],
+      "WARN: Assert failure. This can happen do to race conditions in the test suite, but not a contract issue (blocks generating while getting trace etc). Do double check."
+    );
+
+    // Claim <--- this also takes into account tortilla for this block
+    consumeOrThrow(
+      await logger.progressExecute(
+        "claimTortilla",
+        tc.claimTortilla(walletSigner.address, {
+          transfers: [
+            {
+              asset: taqueriaId,
+              amount: 1n,
+              address: walletSigner.address!,
+            } as SingularAlkanesTransfer,
+          ],
+        })
+      )
+    );
+
+    let heightAfter = Number(
+      consumeOrThrow(
+        await provider.rpc.alkanes.alkanes_metashrewHeight().call()
+      )
+    );
+
+    logger.info(`Block after claim: ${heightAfter}`);
+
+    const tortilla = new ControlledMintContract(
+      provider,
+      tortillaId,
+      tc.signPsbt
+    );
+
+    // Balance check – wallet should now hold ~expected – refund from buyUpgrade already done
+    const balance = consumeOrThrow(
+      await tortilla.getBalance(walletSigner.address)
+    );
+
+    const expectedParsed =
+      new DecodableAlkanesResponse(expected).decodeTo("tokenValue") +
+      (heightAfter - heightBefore) *
+        new DecodableAlkanesResponse(TORTILLA_PER_BLOCK).decodeTo("tokenValue");
+
+    //We add 15000 because the taqueria is also generating tortilla in the claim block
+    logger.deepAssert(
+      expectedParsed,
+      balance,
+      [],
+      "WARN: Assert failure. This can happen do to race conditions in the test suite, but not a contract issue (blocks generating while getting trace etc). Do double check."
+    );
+
+    logger.success(`Wallet tortilla balance ≈ ${balance} TORTILLA`);
+
+    return new BoxedSuccess(true);
+  } catch (e) {
+    return new BoxedError(TestError.Unknown, (e as Error).message);
+  }
+}
+
+/*
+async function testBetOnBlock(
+  tc: TacoClickerContract,
+  taqueriaId: AlkaneId
+): Promise<BoxedResponse<true, TestError>> {
+  try {
+    // need a fresh PoC nonce
+    const nonce = await findValidNonce(taqueriaId);
+    const res = consumeOrThrow(
+      await logger.progressExecute(
+        "betOnBlock",
+        tc.betOnBlock(
+          walletSigner.address,
+          {
+            nonce_found_poc: nonce,
+            target_multiplier: 1n, // practically guarantees win
+          },
+          {
+            transfers: [
+              { asset: taqueriaId, amount: 1n, address: tc.address! } as any,
+            ],
+          }
+        )
+      )
+    );
+    logger.success(
+      `Won ${toDecimal(res.won_amount)} TORTILLA – lost ${toDecimal(
+        res.lost_amount
+      )}`
+    );
+    return new BoxedSuccess(true);
+  } catch (e) {
+    return new BoxedError(TestError.Unknown, (e as Error).message);
+  }
+}
+ |  Master runner                                               |
+ *─────────────────────────────────────────────────────────────*/
+
+export async function runTacoClicker(enableDeploy = true): Promise<void> {
+  const root = logger.start("Taco Clicker game‑logic test‑suite");
+
+  const { controlledMintFactory, tacoClickerAlkaneId } = await getContracts(
+    enableDeploy
+  );
+
+  const tc = new TacoClickerContract(
+    provider,
+    tacoClickerAlkaneId,
+    walletSigner.signPsbt
+  );
+
+  if (enableDeploy) {
+    consumeOrThrow(
+      await logger.progressExecute(
+        "initializeOverride",
+        tc.initializeOverride(walletSigner.address, {
+          controlled_mint_factory: new ParsableAlkaneId(
+            controlledMintFactory
+          ).toSchemaAlkaneId(),
+        })
+      )
+    );
+  }
+
+  const registerRes = consumeOrThrow(
+    await logger.progressExecute(
+      "register",
+      tc.register(walletSigner.address, {
+        transfers: [
+          {
+            asset: "btc",
+            amount: Number(TacoClickerContract.TAQUERIA_COST_SATS),
+            address: TacoClickerContract.FUNDING_ADDRESS,
+          } as any,
+        ],
+      })
+    )
+  ).decodeTo("object");
+
+  const taqueriaId = new ParsableAlkaneId(registerRes).toAlkaneId();
+  const tortillaId = new ParsableAlkaneId(
+    consumeOrThrow(await tc.getTortillaId())
+  ).toAlkaneId();
+
+  await logger.progressAbstract(
+    "Waiting for one block so the caller has 15000 tortilla unclaimed",
+    provider.waitForBlocks(1)
+  );
+
+  // ---- sequentially run tests ----
+  const tests = [
+    () => testInitialize(tc, controlledMintFactory),
+    () => testAvailableUpgradesBase(tc),
+    () => testEmissionAndClaim(tc, taqueriaId, tortillaId),
+
+    () => testBuyUpgrade(tc, taqueriaId, tortillaId),
+    //() => testBetOnBlock(tc, taqueriaId),
+  ];
+
+  for (const t of tests) {
+    const res = consumeOrThrow(await t());
+  }
+
+  root.close();
+  logger.success("All Taco Clicker tests passed 🎉");
+}

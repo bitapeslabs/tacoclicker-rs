@@ -136,3 +136,8 @@ pub struct SchemaBetOnBlockResponse {
     pub won_amount: u128,
     pub lost_amount: u128,
 }
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
+pub struct SchemaCompleteGlobalState {
+    pub emission_state: SchemaGlobalEmissionState,
+    pub salsa_state: SchemaGlobalSalsaState,
+}

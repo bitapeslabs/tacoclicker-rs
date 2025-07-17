@@ -29,11 +29,11 @@ use crate::game::consts::UPGRADES;
 use crate::game::multipliers::{apply_multiplier, multiplier_from_seed};
 use crate::game::schemas::{
     SchemaBetOnBlockParameters, SchemaBetOnBlockResponse, SchemaBuyUpgradeParameters,
-    SchemaGetMultiplierFromHashParameters, SchemaGetMultiplierFromHashResponse,
-    SchemaGetTortillaPerBlockResponse, SchemaGetUnclaimedTortillaResponse,
-    SchemaGlobalEmissionState, SchemaGlobalSalsaState, SchemaTaqueriaEmissionState,
-    SchemaTaqueriaSpecificParameters, SchemaUpgradesEntry, SchemaUpgradesView,
-    SchemaUserUpgradesView, UpgradeKind,
+    SchemaCompleteGlobalState, SchemaGetMultiplierFromHashParameters,
+    SchemaGetMultiplierFromHashResponse, SchemaGetTortillaPerBlockResponse,
+    SchemaGetUnclaimedTortillaResponse, SchemaGlobalEmissionState, SchemaGlobalSalsaState,
+    SchemaTaqueriaEmissionState, SchemaTaqueriaSpecificParameters, SchemaUpgradesEntry,
+    SchemaUpgradesView, SchemaUserUpgradesView, UpgradeKind,
 };
 use crate::game::utils::{get_upgrade_by_id, get_upgrade_entry_by_id, get_upgrade_entry_by_id_mut};
 use crate::schemas::{
@@ -171,8 +171,7 @@ enum TortillaMessage {
     GetConsts,
 
     #[opcode(106)]
-    #[returns(Vec<u8>)]
-    Register,
+    GetTaqueriaEmissionState,
 
     #[opcode(107)]
     #[returns(Vec<u8>)]
@@ -197,13 +196,20 @@ enum TortillaMessage {
     GetMultiplierFromHash,
 
     #[opcode(115)]
-    BuyUpgrade,
+    GetGlobalCompleteState,
 
     #[opcode(116)]
-    BetOnBlock,
+    BuyUpgrade,
 
     #[opcode(117)]
+    BetOnBlock,
+
+    #[opcode(118)]
     ClaimTortilla,
+
+    #[opcode(119)]
+    #[returns(Vec<u8>)]
+    Register,
 
     //#[opcode(118)]
     //ClaimTortillaAirdrop,
@@ -305,6 +311,45 @@ impl Tortilla {
         let consts = self.get_consts_value()?;
 
         response.data = borsh::to_vec(&consts.tortilla_alkane_id)?;
+
+        Ok(response)
+    }
+
+    fn get_taqueria_emission_state(&self) -> Result<CallResponse> {
+        let context = self.context()?;
+        let mut response = CallResponse::forward(&context.incoming_alkanes);
+
+        let params = decode_from_ctx!(context, SchemaTaqueriaSpecificParameters)?;
+
+        let consts = self.get_taqueria_emission_state_pointer(&params.taqueria)?;
+
+        let taqueria_emission_state_bytes = (*consts.get()).clone();
+
+        response.data = borsh::to_vec(&taqueria_emission_state_bytes)?;
+
+        Ok(response)
+    }
+
+    fn get_global_complete_state(&self) -> Result<CallResponse> {
+        let context = self.context()?;
+        let mut response = CallResponse::forward(&context.incoming_alkanes);
+
+        let ptr_global_emission_state = self.get_global_emission_state_pointer();
+        let ptr_salsa_state = self.get_global_salsa_state_pointer();
+
+        let global_emission_state_bytes = (*ptr_global_emission_state.get()).clone();
+        let salsa_state_bytes = (*ptr_salsa_state.get()).clone();
+
+        let global_emission_state =
+            decode_from_vec!(global_emission_state_bytes, SchemaGlobalEmissionState)?;
+        let salsa_state = decode_from_vec!(salsa_state_bytes, SchemaGlobalSalsaState)?;
+
+        let global_state_bytes = borsh::to_vec(&SchemaCompleteGlobalState {
+            emission_state: global_emission_state,
+            salsa_state: salsa_state,
+        })?;
+
+        response.data = global_state_bytes;
 
         Ok(response)
     }

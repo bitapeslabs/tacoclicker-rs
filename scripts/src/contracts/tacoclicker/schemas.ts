@@ -1,6 +1,10 @@
 import { schemaAlkaneId } from "tacoclicker-sdk";
 import { BorshSchema, Infer as BorshInfer } from "borsher";
 
+export const schemaTacoClickerInitializeParams = BorshSchema.Struct({
+  controlled_mint_factory: schemaAlkaneId,
+});
+
 export const schemaTacoClickerConsts = BorshSchema.Struct({
   controlled_mint_factory: schemaAlkaneId,
   tortilla_alkane_id: schemaAlkaneId,
@@ -97,4 +101,46 @@ export const schemaBetOnBlockReq = BorshSchema.Struct({
 export const schemaBetOnBlockRes = BorshSchema.Struct({
   won_amount: BorshSchema.u128,
   lost_amount: BorshSchema.u128,
+});
+
+export const schemaTaqueriaEmissionState = BorshSchema.Struct({
+  taqueria_weight: BorshSchema.u128,
+  reward_debt: BorshSchema.u128,
+  pending: BorshSchema.u128,
+  last_poc_hash: BorshSchema.Vec(BorshSchema.u8),
+});
+
+/*
+export const schemaGlobalEmissionState = BorshSchema.Struct({
+    pub total_weight: u128,
+    pub acc_reward_per_weight: u128,
+    pub last_updated_block: u128,
+}
+
+*/
+export const schemaGlobalEmissionState = BorshSchema.Struct({
+  total_weight: BorshSchema.u128,
+  acc_reward_per_weight: BorshSchema.u128,
+  last_updated_block: BorshSchema.u32,
+});
+
+/*
+
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug)]
+pub struct SchemaGlobalSalsaState {
+    pub current_block: u128,
+    pub best_hash: Vec<u8>,
+    pub best_hash_owner: Vec<u8>, //Increases by 1.5x on each buy. 50000, 75000, etc etc. This is to incentivize people to chase bigger upgrades
+}
+    */
+
+export const schemaGlobalSalsaState = BorshSchema.Struct({
+  current_block: BorshSchema.u128,
+  best_hash: BorshSchema.Vec(BorshSchema.u8),
+  best_hash_owner: BorshSchema.Vec(BorshSchema.u8),
+});
+
+export const schemaGlobalState = BorshSchema.Struct({
+  emission_state: schemaGlobalEmissionState,
+  salsa_state: schemaGlobalSalsaState,
 });

@@ -3,7 +3,8 @@
     "contracts/tacoclicker/Cargo.toml",
     "contracts/sandbox/Cargo.toml",
     "contracts/controlled-mint/Cargo.toml",
-    "contracts/free-mint/Cargo.toml"
+    "contracts/free-mint/Cargo.toml",
+    "contracts/merkle-distributor/Cargo.toml"
   ],
   "rust-analyzer.cargo.extraArgs": ["--target", "wasm32-unknown-unknown"],
   "rust-analyzer.cargo.extraEnv": {

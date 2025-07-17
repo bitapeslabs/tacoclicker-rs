@@ -9,39 +9,14 @@ use alkanes_support::{
 use anyhow::{anyhow, Result};
 use bitcoin::hashes::Hash;
 use bitcoin::Txid;
-use borsh::BorshDeserialize;
 use metashrew_support::index_pointer::KeyValuePointer;
-use std::io::Cursor;
-use std::u128;
-
-use crate::schemas::SchemaControlledMintInitializationParameters;
 
 pub trait MintableToken: AlkaneResponder {
-    fn get_consts_pointer(&self) -> StoragePointer {
-        StoragePointer::from_keyword("/consts")
+    fn name(&self) -> &'static str {
+        "MERKLE DISTRIBUTOR"
     }
-
-    fn get_consts(&self) -> SchemaControlledMintInitializationParameters {
-        let consts_bytes = (*self.get_consts_pointer().get()).clone();
-        let mut byte_reader = Cursor::new(&consts_bytes);
-
-        let consts: SchemaControlledMintInitializationParameters =
-            SchemaControlledMintInitializationParameters::deserialize_reader(&mut byte_reader)
-                //This is in the case someone tries to call the controlled mint alkane factory.
-                .unwrap_or(SchemaControlledMintInitializationParameters {
-                    token_name: "UNSET".to_string(),
-                    token_symbol: "UNSET".to_string(),
-                    premine: 0u128,
-                    cap: u128::MAX,
-                });
-        consts
-    }
-
-    fn name(&self) -> String {
-        self.get_consts().token_name
-    }
-    fn symbol(&self) -> String {
-        self.get_consts().token_symbol
+    fn symbol(&self) -> &'static str {
+        "MERKLE DISTRIBUTOR"
     }
 
     fn total_supply_pointer(&self) -> StoragePointer {
@@ -90,7 +65,7 @@ pub trait MintableToken: AlkaneResponder {
         0
     }
     fn cap(&self) -> u128 {
-        self.get_consts().cap
+        0u128
     }
 
     fn has_tx_hash(&self, txid: &Txid) -> bool {
@@ -113,13 +88,13 @@ pub trait MintableToken: AlkaneResponder {
     fn get_name(&self) -> Result<CallResponse> {
         let ctx = self.context()?;
         let mut rsp = CallResponse::forward(&ctx.incoming_alkanes);
-        rsp.data = self.name().into_bytes();
+        rsp.data = self.name().as_bytes().to_vec();
         Ok(rsp)
     }
     fn get_symbol(&self) -> Result<CallResponse> {
         let ctx = self.context()?;
         let mut rsp = CallResponse::forward(&ctx.incoming_alkanes);
-        rsp.data = self.symbol().into_bytes();
+        rsp.data = self.symbol().as_bytes().to_vec();
         Ok(rsp)
     }
     fn get_total_supply(&self) -> Result<CallResponse> {

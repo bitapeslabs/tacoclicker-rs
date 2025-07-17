@@ -66,7 +66,7 @@ impl Tortilla {
         self.call(&cellpack, &response.alkanes, self.fuel())
             .map_err(|e| {
                 anyhow!(
-                    "TORTILLA: failed to clone alkane @ {},{} → {e}",
+                    "TORTILLA: failed to mint alkane @ {},{} → {e}",
                     target.block,
                     target.tx
                 )
